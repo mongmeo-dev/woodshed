@@ -106,6 +106,13 @@ impl AudioEngine {
         self.output = None;
     }
 
+    /// Pending backend error on the output stream (not cleared; a reopened
+    /// stream starts without one).
+    pub fn stream_error(&self) -> Option<StreamErrorKind> {
+        let output = self.output.as_ref()?;
+        StreamErrorKind::from_code(output.error.load(Ordering::Relaxed))
+    }
+
     /// Last backend error on the output stream, cleared on read.
     pub fn take_stream_error(&self) -> Option<StreamErrorKind> {
         let output = self.output.as_ref()?;

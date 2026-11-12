@@ -1,5 +1,6 @@
 //! Device change detection. Polls the device list on a background thread and
-//! calls a hook when it changes (device plugged or unplugged, default changed).
+//! calls a hook on every tick, flagging ticks where the list changed (device
+//! plugged or unplugged, default changed).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,11 +64,13 @@ impl Drop for DeviceMonitor {
     }
 }
 
-/// Calls `on_change` with the new snapshot whenever the device list differs
-/// from the previous poll.
+/// Polls the device list every `interval` and calls `on_poll(snapshot,
+/// changed)` on every tick; `changed` is true when the list differs from the
+/// previous tick. Calling on every tick lets the app check stream health even
+/// when no device was added or removed.
 pub fn spawn_device_monitor(
     interval: Duration,
-    mut on_change: impl FnMut(&DeviceSnapshot) + Send + 'static,
+    mut on_poll: impl FnMut(&DeviceSnapshot, bool) + Send + 'static,
 ) -> DeviceMonitor {
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -85,10 +88,9 @@ pub fn spawn_device_monitor(
                 }
                 waited = Duration::ZERO;
                 let current = DeviceSnapshot::capture();
-                if current != previous {
-                    on_change(&current);
-                    previous = current;
-                }
+                let changed = current != previous;
+                on_poll(&current, changed);
+                previous = current;
             }
         })
         .ok();

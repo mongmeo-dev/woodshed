@@ -25,6 +25,7 @@ mod handle;
 mod input;
 mod monitor;
 mod offline;
+mod recovery;
 mod shared;
 mod source;
 mod types;
@@ -36,6 +37,7 @@ pub use clock::{ClockPair, event_heard_at_epoch_ms, heard_at_epoch_ms};
 pub use core::{EngineConfig, EngineCore, create_engine};
 pub use device::{
     AudioError, DeviceInfo, Direction, OutputStreamInfo, StreamErrorKind, list_devices,
+    output_device_sample_rate,
 };
 pub use engine::{AudioEngine, MeasuredLatency, OutputRequest};
 pub use handle::{EngineError, EngineHandle};
@@ -44,6 +46,7 @@ pub use input::{
 };
 pub use monitor::{DeviceMonitor, DeviceSnapshot, spawn_device_monitor};
 pub use offline::OfflineEngine;
+pub use recovery::{OutputState, ReopenReason, RetryBackoff, reopen_reason};
 pub use shared::{EngineStats, SharedState, TimingSnapshot};
 pub use source::{ClickSource, Source, testing};
 pub use types::{

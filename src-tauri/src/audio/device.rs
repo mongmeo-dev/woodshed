@@ -124,6 +124,13 @@ pub(crate) fn find_device(id: Option<&str>, direction: Direction) -> Result<Devi
     }
 }
 
+/// Sample rate an output device runs at right now (its current default
+/// configuration), or `None` if it cannot be read.
+pub fn output_device_sample_rate(id: &str) -> Option<u32> {
+    let device = find_device(Some(id), Direction::Output).ok()?;
+    device.default_output_config().ok().map(|c| c.sample_rate())
+}
+
 /// Buffer sizes to try, smallest first. `target` is a floor, not a wish: the
 /// first candidate is the smallest size the device allows that is at least
 /// `target` (the app uses 64 frames — about 1.3 ms at 48 kHz — because smaller
