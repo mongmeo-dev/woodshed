@@ -113,10 +113,41 @@ impl MetronomeStore {
         lock(&self.data).settings = settings.normalized();
     }
 
-    /// Writes everything atomically (temp file + rename).
+    /// Writes what is in memory atomically (temp file + rename).
     pub fn save(&self) -> io::Result<()> {
-        let data = self.get();
-        write_atomically(&self.path, &data)
+        self.save_with(|| {})
+    }
+
+    /// [`Self::save`], calling `between` after the snapshot and before the
+    /// write (tests use it to interleave other saves).
+    fn save_with(&self, between: impl FnOnce()) -> io::Result<()> {
+        self.update_with(|_| Ok::<(), io::Error>(()), between)
+            .map(|_| ())
+    }
+
+    /// Changes the data with `change` and writes the result. Every write goes
+    /// through here: the lock is held from the snapshot to the rename and
+    /// the memory commit, so writers never overwrite each other with older
+    /// snapshots. Memory changes only if the write succeeds.
+    pub fn update<E: From<io::Error>>(
+        &self,
+        change: impl FnOnce(&mut MetronomeData) -> Result<(), E>,
+    ) -> Result<MetronomeData, E> {
+        self.update_with(change, || {})
+    }
+
+    fn update_with<E: From<io::Error>>(
+        &self,
+        change: impl FnOnce(&mut MetronomeData) -> Result<(), E>,
+        between: impl FnOnce(),
+    ) -> Result<MetronomeData, E> {
+        let mut data = lock(&self.data);
+        let mut next = data.clone();
+        change(&mut next)?;
+        between();
+        write_atomically(&self.path, &next)?;
+        *data = next;
+        Ok(data.clone())
     }
 
     /// Saves `settings` under `name`, replacing a preset of the same name.
@@ -129,55 +160,55 @@ impl MetronomeStore {
         if name.chars().count() > MAX_PRESET_NAME {
             return Err(PresetError::NameTooLong);
         }
-        let mut data = lock(&self.data);
-        let mut next = data.clone();
         let preset = Preset {
             name,
             settings: settings.normalized(),
         };
-        match next
-            .presets
-            .iter()
-            .position(|kept| kept.name == preset.name)
-        {
-            Some(index) => next.presets[index] = preset,
-            None if next.presets.len() >= MAX_PRESETS => return Err(PresetError::TooMany),
-            None => next.presets.push(preset),
-        }
-        self.commit(&mut data, next)
+        self.update(|data| {
+            match data
+                .presets
+                .iter()
+                .position(|kept| kept.name == preset.name)
+            {
+                Some(index) => data.presets[index] = preset,
+                None if data.presets.len() >= MAX_PRESETS => return Err(PresetError::TooMany),
+                None => data.presets.push(preset),
+            }
+            Ok(())
+        })
+        .map(|data| data.presets)
     }
 
     /// Deletes the preset called `name` (nothing happens if there is none).
     pub fn delete_preset(&self, name: &str) -> Result<Vec<Preset>, PresetError> {
-        let mut data = lock(&self.data);
-        let mut next = data.clone();
-        next.presets.retain(|preset| preset.name != name);
-        self.commit(&mut data, next)
-    }
-
-    /// Writes `next` and only then makes it current, so a failed write
-    /// leaves memory and disk agreeing.
-    fn commit(
-        &self,
-        data: &mut MetronomeData,
-        next: MetronomeData,
-    ) -> Result<Vec<Preset>, PresetError> {
-        write_atomically(&self.path, &next).map_err(|error| PresetError::SaveFailed {
-            message: error.to_string(),
-        })?;
-        *data = next;
-        Ok(data.presets.clone())
+        self.update(|data| {
+            data.presets.retain(|preset| preset.name != name);
+            Ok::<(), PresetError>(())
+        })
+        .map(|data| data.presets)
     }
 }
 
+impl From<io::Error> for PresetError {
+    fn from(error: io::Error) -> Self {
+        PresetError::SaveFailed {
+            message: error.to_string(),
+        }
+    }
+}
+
+/// Temp file + rename. The temp name is per process, so another running
+/// copy of the app (sharing the app data directory) never truncates it.
 fn write_atomically(path: &Path, data: &MetronomeData) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
     let text = serde_json::to_string_pretty(data).map_err(io::Error::other)?;
-    let temp = path.with_extension("json.tmp");
+    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     fs::write(&temp, text)?;
-    fs::rename(&temp, path)
+    fs::rename(&temp, path).inspect_err(|_| {
+        let _ = fs::remove_file(&temp);
+    })
 }
 
 #[cfg(test)]
@@ -280,6 +311,58 @@ mod tests {
         let result = store.save_preset("x", at(90.0));
         assert!(matches!(result, Err(PresetError::SaveFailed { .. })));
         assert!(store.get().presets.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_save_never_overwrites_a_preset_saved_or_deleted_meanwhile() {
+        use std::sync::{Arc, Barrier};
+        let dir = temp_dir("interleave");
+        let store = Arc::new(MetronomeStore::load(&dir));
+        store.save_preset("old", at(70.0)).unwrap();
+
+        for round in 0..2 {
+            // A takes its snapshot, then lets B start its own save while A
+            // has not written yet.
+            let barrier = Arc::new(Barrier::new(2));
+            let a = {
+                let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+                std::thread::spawn(move || {
+                    store.set_settings(at(111.0));
+                    store.save_with(|| {
+                        barrier.wait();
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    })
+                })
+            };
+            barrier.wait();
+            let b = if round == 0 {
+                store.save_preset("new", at(90.0))
+            } else {
+                store.delete_preset("old")
+            };
+            assert!(b.is_ok());
+            a.join().unwrap().unwrap();
+        }
+
+        let memory = store.get();
+        let names: Vec<_> = memory.presets.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["new"],
+            "added preset kept, deleted one not revived"
+        );
+        let text = fs::read_to_string(dir.join(METRONOME_FILE)).unwrap();
+        let on_disk: MetronomeData = serde_json::from_str(&text).unwrap();
+        assert_eq!(on_disk, memory);
+        assert_eq!(MetronomeStore::load(&dir).get(), memory);
+        assert_eq!(memory.settings.bpm, 111.0);
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 }
