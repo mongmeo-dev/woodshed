@@ -28,14 +28,14 @@
 
 .drum-play {
   justify-content: center;
-  min-width: 88px;
+  min-width: var(--ws-drum-play-width);
 }
 
 .drum-number,
 .drum-text {
-  min-height: 32px;
+  min-height: var(--ws-drum-control-height);
   padding: 0 var(--ws-space-xs);
-  border: 1px solid var(--ws-color-hairline);
+  border: var(--ws-drum-border-width) solid var(--ws-color-hairline);
   border-radius: var(--ws-radius-sm);
   background: var(--ws-color-canvas);
   color: var(--ws-color-text);
@@ -47,12 +47,12 @@
 }
 
 .drum-number {
-  width: 64px;
+  width: var(--ws-drum-number-width);
   font-variant-numeric: tabular-nums;
 }
 
 .drum-text {
-  width: 200px;
+  width: var(--ws-drum-name-width);
 }
 
 .drum-number[aria-invalid="true"],
@@ -66,11 +66,11 @@
 }
 
 .drum-slider {
-  width: 104px;
+  width: var(--ws-drum-slider-width);
 }
 
 .drum-value {
-  min-width: 3em;
+  min-width: var(--ws-drum-value-width);
   color: var(--ws-color-text-secondary);
   font-size: var(--ws-type-caption-size);
   font-variant-numeric: tabular-nums;
@@ -82,9 +82,9 @@
 }
 
 .drum-button {
-  min-height: 32px;
+  min-height: var(--ws-drum-control-height);
   padding: 0 var(--ws-space-sm);
-  border: 1px solid var(--ws-color-hairline);
+  border: var(--ws-drum-border-width) solid var(--ws-color-hairline);
   border-radius: var(--ws-radius-sm);
   background: var(--ws-color-canvas);
   font-size: var(--ws-type-caption-size);
@@ -107,7 +107,7 @@
   gap: var(--ws-space-xs);
   padding: var(--ws-space-sm) var(--ws-space-md);
   background: var(--ws-color-surface);
-  border: 1px solid var(--ws-color-hairline);
+  border: var(--ws-drum-border-width) solid var(--ws-color-hairline);
   border-radius: var(--ws-radius-lg);
   font-size: var(--ws-type-caption-size);
 }
@@ -121,7 +121,7 @@
   padding: var(--ws-space-sm) var(--ws-space-md);
   overflow-x: auto;
   background: var(--ws-color-surface);
-  border: 1px solid var(--ws-color-hairline);
+  border: var(--ws-drum-border-width) solid var(--ws-color-hairline);
   border-radius: var(--ws-radius-lg);
 }
 
@@ -131,10 +131,12 @@
   border: 0;
   min-inline-size: 0;
   display: grid;
-  grid-template-columns: 112px 28px 64px minmax(0, 1fr);
+  grid-template-columns:
+    var(--ws-drum-track-label-width) var(--ws-drum-compact-size) var(--ws-drum-volume-width)
+    minmax(0, 1fr);
   align-items: center;
   gap: var(--ws-space-xs);
-  min-width: 560px;
+  min-width: var(--ws-drum-grid-min-width);
 }
 
 .drum-track-name {
@@ -154,8 +156,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--ws-drum-compact-size);
+  height: var(--ws-drum-compact-size);
   padding: 0;
   border: 0;
   border-radius: var(--ws-radius-sm);
@@ -178,12 +180,12 @@
 }
 
 .drum-mute svg {
-  width: 18px;
-  height: 18px;
+  width: var(--ws-drum-icon-size);
+  height: var(--ws-drum-icon-size);
 }
 
 .drum-volume {
-  width: 64px;
+  width: var(--ws-drum-volume-width);
   margin: 0;
 }
 
@@ -202,7 +204,7 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 28px;
+  height: var(--ws-drum-compact-size);
   padding: 0;
   border: 0;
   border-radius: var(--ws-radius-sm);
@@ -247,7 +249,7 @@
 }
 
 .drum-ruler {
-  min-height: 16px;
+  min-height: var(--ws-drum-ruler-height);
 }
 
 .drum-tick {
