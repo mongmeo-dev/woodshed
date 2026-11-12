@@ -160,19 +160,13 @@ impl Sequencer {
         loop {
             let step = self.next_step;
             let exact = self.step_frame(step).round();
+            // Every step from `next_step` on is still to be heard. A change
+            // (less swing) can move one behind the reschedule point before
+            // it played; it then plays at the point instead of vanishing.
             let frame = if exact >= floor {
                 exact as FramePos
-            } else if floor - exact <= self.frames_per_step / 2.0
-                && self.step_frame(step + 1).round() > floor
-            {
-                // A change moved this step just behind the reschedule point
-                // before it played: play it there rather than drop it. Only
-                // the last step behind the point qualifies, so no two land
-                // on the same frame.
-                self.floor
             } else {
-                self.next_step += 1;
-                continue;
+                self.floor
             };
             if frame >= until {
                 return Ok(added);
