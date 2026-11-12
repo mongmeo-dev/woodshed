@@ -34,10 +34,105 @@
     },
     "saveFailed": "Couldn't save settings"
   },
+  "drumMachine": {
+    "play": "Play",
+    "stop": "Stop",
+    "tempo": "Tempo",
+    "bpm": "{{value}} BPM",
+    "bpmError": "Enter 40 to 300",
+    "swing": "Swing",
+    "swingValue": "{{value}}%",
+    "swingUnit": "Swing Note",
+    "eighth": "8th Notes",
+    "sixteenth": "16th Notes",
+    "length": "Length",
+    "steps": "{{value}} Steps",
+    "velocity": "Velocity",
+    "soft": "Soft",
+    "normal": "Normal",
+    "accent": "Accent",
+    "preset": "Preset",
+    "choosePreset": "Choose a Preset",
+    "myPatterns": "My Patterns",
+    "choosePattern": "Choose a Pattern",
+    "noPatterns": "No Saved Patterns",
+    "save": "Save",
+    "replace": "Replace",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "patternName": "Pattern Name",
+    "deleteConfirm": "Delete “{{name}}”?",
+    "emptyName": "Enter a name",
+    "saveFailed": "Couldn't save the pattern",
+    "deleteFailed": "Couldn't delete the pattern",
+    "step": "{{track}}, step {{step}}",
+    "mute": "Mute {{track}}",
+    "volume": "{{track}} Volume",
+    "tracks": {
+      "kick": "Kick",
+      "snare": "Snare",
+      "sidestick": "Side Stick",
+      "clap": "Clap",
+      "closedHat": "Closed Hi-Hat",
+      "openHat": "Open Hi-Hat",
+      "highTom": "High Tom",
+      "lowTom": "Low Tom",
+      "ride": "Ride",
+      "crash": "Crash"
+    },
+    "presets": {
+      "rock": "Rock",
+      "funk": "Funk",
+      "shuffle": "Shuffle",
+      "halfTimeShuffle": "Half-Time Shuffle",
+      "blues": "Blues",
+      "jazzSwing": "Jazz Swing",
+      "bossaNova": "Bossa Nova",
+      "reggae": "Reggae",
+      "hipHop": "Hip-Hop",
+      "metal": "Metal (Double Bass)",
+      "ballad": "Ballad",
+      "disco": "Disco"
+    }
+  },
   "units": {
     "hz": "{{value}} Hz",
     "frames": "{{value}} frames",
     "ms": "{{value}} ms"
+  },
+  "tuner": {
+    "note": "Note",
+    "centsLabel": "Cents",
+    "cents": "{{value}} cents",
+    "frequency": "Frequency",
+    "input": {
+      "device": "Input Device",
+      "systemDefault": "System Default",
+      "disconnected": "Disconnected Device",
+      "using": "Using",
+      "channel": "Channel",
+      "channelNumber": "Channel {{value}}",
+      "mixDown": "All Channels",
+      "level": "Input Level"
+    },
+    "reference": {
+      "label": "Reference Pitch",
+      "value": "A4 = {{value}} Hz",
+      "lower": "Lower Reference Pitch",
+      "raise": "Raise Reference Pitch"
+    },
+    "strings": {
+      "label": "Open Strings",
+      "guitar6": "Guitar (6)",
+      "bass4": "Bass (4)",
+      "bass5": "Bass (5)"
+    },
+    "status": {
+      "permissionDenied": "Allow microphone access in System Settings",
+      "openSettings": "Open System Settings",
+      "permissionPending": "Allow microphone access",
+      "noInput": "Can't open the input device"
+    }
   },
   "stems": {
     "percent": "{{value}}%",
