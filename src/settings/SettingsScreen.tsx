@@ -8,9 +8,11 @@ import {
   getAudioStatus,
   listDevices,
   onDevicesChanged,
+  onOutputChanged,
   onPlaybackEvent,
   playTestSound,
   setOutputDevice,
+  subscribeAsync,
 } from "../lib/audio";
 import type { Theme } from "../lib/settings";
 import { SegmentedControl } from "../shell/SegmentedControl";
@@ -23,25 +25,38 @@ const BEAT_FLASH_MS = 600;
 function useAudioStatus() {
   const [status, setStatus] = useState<AudioStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
-    const [nextStatus, nextDevices] = await Promise.all([getAudioStatus(), listDevices("output")]);
-    setStatus(nextStatus);
-    setDevices(nextDevices);
+    try {
+      const [nextStatus, nextDevices] = await Promise.all([
+        getAudioStatus(),
+        listDevices("output"),
+      ]);
+      if (!mounted.current) return;
+      setStatus(nextStatus);
+      setDevices(nextDevices);
+    } catch {
+      // Keep the last known values; the next poll or event refreshes them.
+    }
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void refresh();
     const timer = window.setInterval(() => {
-      void getAudioStatus().then(setStatus);
+      getAudioStatus().then(
+        (next) => mounted.current && setStatus(next),
+        () => {},
+      );
     }, STATUS_POLL_MS);
-    let unlisten: (() => void) | undefined;
-    void onDevicesChanged(() => void refresh()).then((stop) => {
-      unlisten = stop;
-    });
+    const stopDevices = subscribeAsync(() => onDevicesChanged(() => void refresh()));
+    const stopOutput = subscribeAsync(() => onOutputChanged(() => void refresh()));
     return () => {
+      mounted.current = false;
       window.clearInterval(timer);
-      unlisten?.();
+      stopDevices();
+      stopOutput();
     };
   }, [refresh]);
 
@@ -76,8 +91,12 @@ function useHeardBeat() {
   }, []);
 
   const play = useCallback(async () => {
-    const scheduled = await playTestSound();
-    if (scheduled) pendingFrame.current = scheduled.frame;
+    try {
+      const scheduled = await playTestSound();
+      if (scheduled) pendingFrame.current = scheduled.frame;
+    } catch {
+      pendingFrame.current = null;
+    }
   }, []);
 
   return { beat, play };

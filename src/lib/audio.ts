@@ -69,6 +69,16 @@ export interface DeviceSnapshot {
 }
 
 export const DEVICES_CHANGED_EVENT = "audio://devices-changed";
+export const OUTPUT_CHANGED_EVENT = "audio://output-changed";
+
+/** Payload of {@link OUTPUT_CHANGED_EVENT}. */
+export interface OutputChanged {
+  generation: number;
+  deviceId: string;
+  sampleRate: number;
+  channels: number;
+  bufferFrames: number | null;
+}
 
 const EMPTY_STATUS: AudioStatus = {
   output: null,
@@ -127,22 +137,38 @@ export function delayUntilHeard(
 
 type PlaybackListener = (event: PlaybackEvent) => void;
 const playbackListeners = new Set<PlaybackListener>();
-let subscribed = false;
+type SubscriptionState = "idle" | "pending" | "ready";
+let subscription: SubscriptionState = "idle";
+
+/** Delay before retrying a failed `audio_subscribe`. */
+export const SUBSCRIBE_RETRY_MS = 1000;
+
+/** Opens the shared channel; on failure retries while listeners remain. */
+function ensureSubscribed(): void {
+  if (subscription !== "idle" || playbackListeners.size === 0 || !inTauri()) return;
+  subscription = "pending";
+  const channel = new Channel<PlaybackEvent>();
+  channel.onmessage = (event) => {
+    for (const notify of playbackListeners) notify(event);
+  };
+  call("audio_subscribe", { onEvent: channel }, undefined).then(
+    () => {
+      subscription = "ready";
+    },
+    () => {
+      subscription = "idle";
+      setTimeout(ensureSubscribed, SUBSCRIBE_RETRY_MS);
+    },
+  );
+}
 
 /**
  * Receives every rendered `notify` event. One Tauri channel is shared by all
- * listeners; it is opened on first use.
+ * listeners; it is opened on first use and retried if opening fails.
  */
 export function onPlaybackEvent(listener: PlaybackListener): () => void {
   playbackListeners.add(listener);
-  if (!subscribed && inTauri()) {
-    subscribed = true;
-    const channel = new Channel<PlaybackEvent>();
-    channel.onmessage = (event) => {
-      for (const notify of playbackListeners) notify(event);
-    };
-    void call("audio_subscribe", { onEvent: channel }, undefined);
-  }
+  ensureSubscribed();
   return () => {
     playbackListeners.delete(listener);
   };
@@ -153,4 +179,42 @@ export async function onDevicesChanged(
 ): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
   return listen<DeviceSnapshot>(DEVICES_CHANGED_EVENT, (event) => listener(event.payload));
+}
+
+/**
+ * Fires after every successful output (re)open — manual switch, following the
+ * system default, or recovery. Frames scheduled for an older `generation`
+ * were computed at the old sample rate: reschedule them.
+ */
+export async function onOutputChanged(
+  listener: (change: OutputChanged) => void,
+): Promise<UnlistenFn> {
+  if (!inTauri()) return () => {};
+  return listen<OutputChanged>(OUTPUT_CHANGED_EVENT, (event) => listener(event.payload));
+}
+
+/**
+ * Starts an async subscription and returns a synchronous stop function that
+ * also covers the case where the subscription finishes after stop was called.
+ * Errors are reported to `onError` instead of becoming unhandled rejections.
+ */
+export function subscribeAsync(
+  subscribe: () => Promise<UnlistenFn>,
+  onError: (error: unknown) => void = () => {},
+): () => void {
+  let stopped = false;
+  let unlisten: UnlistenFn | undefined;
+  subscribe().then(
+    (stop) => {
+      if (stopped) stop();
+      else unlisten = stop;
+    },
+    (error: unknown) => {
+      if (!stopped) onError(error);
+    },
+  );
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
 }
