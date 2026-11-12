@@ -6,6 +6,7 @@ import {
   normalizeSettings,
   parseBpm,
   roundBpm,
+  subdivisionNote,
   withMeter,
 } from "./model";
 import { TAP_RESET_MS, TapTempo } from "./tapTempo";
@@ -76,6 +77,13 @@ describe("model", () => {
     expect(settings.trainer.stepBpm).toBe(0.1);
     expect(settings.trainer.atMax).toBe("hold");
     expect(normalizeSettings(null)).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test("halved and quartered beats are named after the beat unit", () => {
+    expect([2, 4].map((n) => subdivisionNote(n, 4))).toEqual([8, 16]);
+    expect([2, 4].map((n) => subdivisionNote(n, 8))).toEqual([16, 32]);
+    expect([2, 4].map((n) => subdivisionNote(n, 2))).toEqual([4, 8]);
+    expect([1, 3, 5, 6].map((n) => subdivisionNote(n, 4))).toEqual([null, null, null, null]);
   });
 
   test("tempo shows one decimal in the UI language", () => {

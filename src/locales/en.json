@@ -35,11 +35,18 @@
     "subdivisionLabel": "Subdivision",
     "subdivision": {
       "1": "Off",
-      "2": "8th",
       "3": "Triplet",
-      "4": "16th",
       "5": "Quintuplet",
       "6": "Sextuplet"
+    },
+    "noteName": {
+      "2": "Half",
+      "4": "Quarter",
+      "8": "8th",
+      "16": "16th",
+      "32": "32nd",
+      "64": "64th",
+      "128": "128th"
     },
     "soundLabel": "Sound",
     "sound": {

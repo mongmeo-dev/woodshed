@@ -20,6 +20,7 @@ import {
   SOUNDS,
   type Sound,
   SUBDIVISIONS,
+  subdivisionNote,
   type TrainerEnd,
   withMeter,
 } from "./model";
@@ -124,10 +125,15 @@ export function MetronomeScreen() {
     value: sound,
     label: t(`metronome.sound.${sound}`),
   }));
-  const subdivisionOptions = SUBDIVISIONS.map((value) => ({
-    value: String(value),
-    label: t(`metronome.subdivision.${value}`),
-  }));
+  // Keys built from numbers; both families exist in ko and en (i18n.test.ts).
+  const label = t as (key: string) => string;
+  const subdivisionOptions = SUBDIVISIONS.map((value) => {
+    const note = subdivisionNote(value, settings.noteValue);
+    return {
+      value: String(value),
+      label: note ? label(`metronome.noteName.${note}`) : label(`metronome.subdivision.${value}`),
+    };
+  });
   const atMaxOptions = [
     { value: "hold", label: t("metronome.trainer.hold") },
     { value: "stop", label: t("metronome.trainer.stop") },
