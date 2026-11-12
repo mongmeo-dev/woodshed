@@ -28,6 +28,12 @@ log = "0.4.35"
 thiserror = "2.0.21"
 realfft = "3.5.1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Microphone permission (AVCaptureDevice); same objc2 family as tauri's.
+objc2 = "0.6.5"
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+block2 = "0.6.2"
+
 # The tuner tests run the FFT on seconds of audio; keep them fast in debug.
 [profile.dev.package.rustfft]
 opt-level = 3

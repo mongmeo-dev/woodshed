@@ -20,6 +20,8 @@ fn settings_save(
     // The output device belongs to the audio output manager
     // (`audio_set_output_device`); a save from the screen never changes it.
     settings.output_device_id = store.get().output_device_id;
+    // Tuner choices belong to the tuner commands (`tuner_select_input`, ...).
+    settings.tuner = store.get().tuner;
     store.save(settings).map_err(|error| error.to_string())
 }
 
@@ -36,6 +38,8 @@ pub fn run() {
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
             app.manage(audio);
+            let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
+            app.manage(tuner);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,11 +51,17 @@ pub fn run() {
             app_audio::audio_subscribe,
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
+            tuner::service::tuner_start,
+            tuner::service::tuner_stop,
+            tuner::service::tuner_select_input,
+            tuner::service::tuner_set_reference,
+            tuner::service::tuner_open_microphone_settings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                app.state::<tuner::TunerService>().shutdown();
                 app.state::<app_audio::AudioService>().shutdown();
             }
         });
