@@ -140,6 +140,7 @@ let reports = engine.take_notifications();
 - `audio.wav`: 재생용 사본입니다. **16bit PCM WAV, 원본 샘플레이트 그대로, 1~2채널.**
 - `waveform.json`: 파형 요약입니다(구간별 피크, 0~255 정수 배열).
 - `stems/<name>.wav`: 분리 결과입니다. `<name>`은 `vocals`, `drums`, `bass`, `guitar`, `piano`, `other`. **형식은 `audio.wav`와 같게 맞춥니다: 16bit PCM WAV, manifest `sampleRate`와 같은 레이트, 1~2채널, 길이는 `frames`와 같게.** 레이트가 다르면 곡을 열지 못하고, 짧은 스템은 뒤가 무음으로 재생됩니다.
+- `.separating/<name>.wav`: 분리 중인 스템입니다. 6개가 모두 끝나면 디렉터리째 이름을 바꿔 `stems/`와 교체하고(이전 `stems/`는 교체하는 동안만 `.stems-old/`), 취소·실패·재시작 때 지웁니다.
 - 가져오기는 `songs/.incoming/<id>/`에서 조립한 뒤 이름 바꾸기로 `songs/<id>/`에 놓습니다. 목록은 점(.)으로 시작하는 폴더를 건너뛰고, 앱을 시작할 때 `.incoming`을 비웁니다.
 
 ### manifest
@@ -161,14 +162,18 @@ let reports = engine.take_notifications();
 
 - `source`는 `{ "kind": "file", "fileName" }` 또는 `{ "kind": "youtube", "url", "videoId" }`입니다.
 - `stems`가 없거나 비어 있으면 분리 전입니다. `status`는 `pending` | `running` | `ready` | `failed`입니다.
-- stem-engine은 분리를 시작할 때 6개 항목을 `running`(또는 `pending`)으로 쓰고, 각 파일을 임시 이름으로 쓴 뒤 `stems/<name>.wav`로 이름을 바꾸고 `ready`로 바꿉니다. 실패하면 `failed`입니다.
+- stem-engine은 분리 전인 곡을 큐에 넣을 때 6개 항목을 `pending`, 시작할 때 `running`으로 씁니다. 6개를 `.separating/`에 다 쓴 뒤 `stems/`로 교체하고 한 번의 `Library::update`로 모두 `ready`로 바꿉니다. 취소하면 빈 목록(분리 전), 실패하면 `failed`입니다.
+- **이미 모든 항목이 `ready`인 곡을 다시 분리할 때는 새 스템 6개가 끝나 교체할 때까지 `stems/`와 manifest를 건드리지 않습니다.** 취소·실패·앱 종료 때도 이전 스템이 그대로 남습니다. 이때 진행 중 표시는 manifest가 아니라 이벤트와 `stems_separations`로만 보입니다.
+- 커밋 시점: 이미 분리된 곡은 `.separating/` → `stems/` 이름 바꾸기가 커밋이고(manifest는 이미 `ready`라 다시 쓰지 않음) 그 뒤에는 실패할 단계가 없습니다. 분리 전 곡은 `ready`로 바꾸는 `Library::update`가 커밋이고, 이것이 실패하면 새 `stems/`를 치우고 이전 디렉터리를 되돌립니다. 그래서 `stems/` 옆의 `.stems-old/`는 커밋이 끝난 뒤에만, `stems/` 없이 혼자 있는 `.stems-old/`는 커밋 전에만 생깁니다.
+- 앱을 시작하면 stem-engine이 복구합니다: `.separating/`을 지우고, `stems/` 없이 남은 `.stems-old/`는 되돌리고 `stems/` 옆에 남은 것은 지우며, 작업이 없는 `pending`·`running` 항목은 빈 목록으로 되돌립니다(교체까지 끝난 경우는 `ready`). 분리를 시작할 때도 남은 `.stems-old/`를 같은 규칙으로 정리합니다.
 - 읽기는 Rust `stems::Library`의 `get`·`list`로 합니다. **가져온 뒤 manifest를 바꾸는 일은 `Library::update(id, |manifest| …)`로만 합니다.** 이 함수는 프로세스 전역 잠금 안에서 파일을 다시 읽고, 클로저로 고친 뒤, 고유한 임시 파일과 이름 바꾸기로 저장합니다. 그래서 분리 진행과 화면이 동시에 고쳐도 서로의 변경을 잃지 않습니다. manifest 파일을 직접 쓰지 않습니다. 타입은 `Manifest`, `StemName`, `StemStatus`, `StemEntry`입니다.
 - 트랙 결정: 모든 항목이 `ready`일 때만 `Manifest::tracks()`가 스템 트랙을 `vocals → drums → bass → guitar → piano → other` 순서(manifest에 있는 것만)로 돌려주고, 그 전에는 `original`(`audio.wav`) 하나입니다. 믹서는 이 목록대로 트랙 수가 바뀝니다.
 
 ### 화면 연결
 
-- 분리 실행 명령 `stems_separate({ songId })`는 stem-engine이 만듭니다. 화면의 `SeparationSlot`(`src/tools/stemSplitter/SeparationSlot.tsx`)에 `onSeparate`를 넘기면 버튼이 보이고, 지금은 넘기지 않아 숨겨져 있습니다.
-- 진행 이벤트 `stems://separation`(Rust `stems::SEPARATION_EVENT`, `SeparationEvent`): `{ songId, state: "running" | "done" | "failed", progress: 0.0~1.0 | null }`. 화면은 `running`이면 진행률, `failed`면 짧은 오류를 보이고, `done`이면 곡 목록을 다시 읽은 뒤 열린 곡이면 같은 위치에서 다시 엽니다(스템 트랙 믹서).
+- 분리 명령(stem-engine, `src-tauri/src/separation/`): `stems_separate({ songId })`는 곡을 큐에 넣고, `stems_cancel_separation({ songId })`는 대기 중이면 바로 빼고 실행 중이면 다음 청크(7.8초)에서 멈춥니다. 둘 다 결과는 이벤트로 옵니다. `stems_separations()`는 끝나지 않은 분리(실행 중 먼저, 그다음 대기)를 마지막 이벤트 모양으로 돌려줍니다. 분리는 한 번에 한 곡씩 합니다.
+- 진행 이벤트 `stems://separation`(Rust `stems::SEPARATION_EVENT`, `SeparationEvent`): `{ songId, state: "running" | "done" | "failed" | "cancelled", progress: 0.0~1.0 | null }`. `running`의 `progress`는 대기·모델 준비 중이면 `null`, 청크를 시작하면 0.0, 이후 끝난 청크 비율입니다. `done`은 `progress` 1.0, 나머지는 `null`입니다.
+- 화면(`SeparationSlot`): 분리 전이거나 실패한 곡에 분리 버튼을 보이고, `running`이면 진행률(`null`이면 준비 중)과 취소 버튼, `failed`면 짧은 오류를 보입니다. `done`·`failed`·`cancelled`를 받으면 곡 목록을 다시 읽고, `done`이면 열린 곡을 같은 위치에서 다시 엽니다(스템 트랙 믹서). 화면은 이벤트 구독을 화면이 열려 있는 동안 한 번만 하고, 구독이 연결된 뒤에 `stems_separations()`와 곡 목록을 다시 읽어 맞춥니다(그 뒤 온 이벤트가 우선, 확인되지 않은 `running`은 버림). 이벤트가 없으면 manifest를 따릅니다: `pending`·`running`이면 준비 중, `failed`면 오류, 모두 `ready`면 남은 `running` 표시보다 우선하고 원본 트랙으로 열려 있으면 스템으로 다시 엽니다.
 - 플레이어는 곡을 열 때 트랙 파일을 열어 둡니다. 열린 곡의 `audio.wav`는 바꾸지 말고, 스템은 새 이름으로 쓴 뒤 이름을 바꿉니다.
 
 ### 플레이어 (`StemPlayer`)
@@ -184,3 +189,10 @@ let reports = engine.take_notifications();
 - `src-tauri/binaries/{yt-dlp,ffmpeg}-<target triple>`은 git에 넣지 않습니다. `mise run binaries`(= `pnpm binaries`, `scripts/fetch-binaries.sh`)가 yt-dlp를 받고 ffmpeg(오디오 전용 LGPL 구성)를 빌드합니다. 버전·체크섬은 스크립트에 고정되어 있고, 결과는 `~/Library/Caches/dev.mongmeo.woodshed/binaries`에 캐시됩니다. `pnpm tauri build`는 `beforeBuildCommand`에서 이를 실행합니다.
 - 바이너리가 없으면 `src-tauri/build.rs`가 빈 자리표시 파일을 만들어 check·테스트·dev 빌드가 네트워크 없이 통과합니다. 이때 앱은 YouTube 가져오기에서 `toolsMissing` 오류만 보입니다.
 - 실행 파일 옆의 sidecar는 `stems::Tools::locate()`로 찾습니다. stem-engine이 ffmpeg를 쓰면 같은 방법으로 찾습니다. 라이선스 고지는 `LICENSES/`에 있고 앱 번들 `Resources/LICENSES/`에 들어갑니다.
+
+### 분리 모델 (stem-engine, `src-tauri/src/separation/`)
+
+- `src-tauri/models/htdemucs_6s_fp32.mlmodelc`는 git에 넣지 않습니다. `mise run stem-model`(= `pnpm stem-model`, `tools/stem-model/build.sh`)이 HF 고정 리비전 가중치를 sha256으로 확인해 받고, 고정한 uv·Python·잠금 파일로 변환·컴파일해 `~/Library/Caches/dev.mongmeo.woodshed/models`에 캐시합니다. `pnpm tauri build`는 `beforeBuildCommand`에서 실행합니다.
+- 모델이 없으면 `build.rs`가 빈 디렉터리를 만들어 check·테스트가 네트워크 없이 통과하고, Core ML 실측 테스트는 건너뛴 사실을 출력합니다. 앱은 번들 리소스, 그다음 위 캐시에서 모델을 찾고, 없으면 분리가 `failed`로 끝납니다.
+- Core ML은 `CPUAndGPU`로만 돌립니다. GPU가 가끔 틀린 결과를 내므로 `VerifiedModel`이 같은 청크를 두 번 돌려 일치할 때만 받아들이고, 4번 안에 일치하지 않으면 그 청크를 CPU로 돌립니다. 모델·Core ML 객체는 작업 스레드 하나에서만 만들고 씁니다.
+- 모델 밖 DSP를 바꾸면 `tools/stem-model/make_dsp_fixture.py`로 기준값을 다시 만들고, 모델·변환을 바꾸면 `ref_torch.py`·`compare.py`(예제 `separate_wav`)로 PyTorch와 다시 비교합니다.

@@ -322,7 +322,9 @@
     "separation": {
       "start": "스템 분리",
       "running": "분리 중 {{percent}}%",
-      "failed": "분리하지 못했습니다"
+      "preparing": "분리 준비 중",
+      "failed": "분리하지 못했습니다",
+      "cancel": "취소"
     },
     "errors": {
       "invalidLink": "YouTube 영상 링크가 아닙니다",

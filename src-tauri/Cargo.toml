@@ -38,6 +38,9 @@ realfft = "3.5.1"
 objc2 = "0.6.5"
 objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
 block2 = "0.6.2"
+# Stem separation model (Core ML), see src/separation/coreml.rs.
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue"] }
+objc2-core-ml = { version = "0.3.2", default-features = false, features = ["std", "block2", "MLDictionaryFeatureProvider", "MLFeatureProvider", "MLFeatureValue", "MLModel", "MLModelConfiguration", "MLMultiArray"] }
 
 # DSP and decoding crates are slow unoptimised; keep debug builds and tests
 # (stem player, tuner FFT) usable.
