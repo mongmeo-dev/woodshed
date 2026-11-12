@@ -35,7 +35,9 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            let metronome = metronome::MetronomeService::start(&data_dir, &audio);
             app.manage(audio);
+            app.manage(metronome);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,6 +49,13 @@ pub fn run() {
             app_audio::audio_subscribe,
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
+            metronome::service::metronome_load,
+            metronome::service::metronome_subscribe,
+            metronome::service::metronome_start,
+            metronome::service::metronome_update,
+            metronome::service::metronome_stop,
+            metronome::service::metronome_save_preset,
+            metronome::service::metronome_delete_preset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")
