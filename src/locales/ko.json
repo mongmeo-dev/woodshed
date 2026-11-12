@@ -10,6 +10,91 @@
     "stemSplitter": "스템 분리",
     "fretboard": "스케일 지판"
   },
+  "metronome": {
+    "tempo": "템포",
+    "bpm": "BPM",
+    "bpmValue": "{{value}} BPM",
+    "bpmError": "{{min}}~{{max}} 사이로 입력하세요",
+    "start": "시작",
+    "stop": "정지",
+    "tap": "탭",
+    "slower": "1 BPM 느리게",
+    "faster": "1 BPM 빠르게",
+    "accents": "박별 강세",
+    "beatAccent": "{{beat}}박, {{accent}}",
+    "accent": {
+      "strong": "강",
+      "normal": "보통",
+      "weak": "약",
+      "mute": "무음"
+    },
+    "rhythm": "리듬",
+    "meter": "박자",
+    "beatsPerBar": "마디당 박 수",
+    "beatUnit": "박 단위 음표",
+    "subdivisionLabel": "서브디비전",
+    "subdivision": {
+      "1": "없음",
+      "3": "셋잇단",
+      "5": "다섯잇단",
+      "6": "여섯잇단"
+    },
+    "noteName": {
+      "2": "2분",
+      "4": "4분",
+      "8": "8분",
+      "16": "16분",
+      "32": "32분",
+      "64": "64분",
+      "128": "128분"
+    },
+    "soundLabel": "음색",
+    "sound": {
+      "click": "클릭",
+      "woodblock": "우드블록",
+      "beep": "비프",
+      "cowbell": "카우벨"
+    },
+    "trainer": {
+      "section": "템포 트레이너",
+      "on": "사용",
+      "every": "올리는 간격",
+      "bars": "마디",
+      "step": "올리는 폭",
+      "max": "최대 템포",
+      "atMax": "최대 템포가 되면",
+      "hold": "유지",
+      "stop": "정지"
+    },
+    "poly": {
+      "section": "폴리리듬",
+      "on": "사용",
+      "ratio": "비율",
+      "pulses": "폴리리듬 클릭 수",
+      "beats": "주 박 수",
+      "sound": "폴리리듬 음색"
+    },
+    "presets": {
+      "section": "프리셋",
+      "empty": "저장한 프리셋 없음",
+      "name": "프리셋 이름",
+      "save": "저장",
+      "replace": "덮어쓰기",
+      "load": "불러오기",
+      "loadNamed": "{{name}} 불러오기",
+      "delete": "삭제",
+      "deleteNamed": "{{name}} 삭제",
+      "confirmDelete": "‘{{name}}’ 프리셋을 삭제할까요?",
+      "cancel": "취소",
+      "deleted": "‘{{name}}’ 프리셋을 삭제했습니다",
+      "error": {
+        "emptyName": "이름을 입력하세요",
+        "nameTooLong": "이름을 {{max}}자 이내로 입력하세요",
+        "tooMany": "프리셋이 너무 많습니다. 하나를 삭제한 뒤 저장하세요",
+        "saveFailed": "프리셋을 저장하지 못했습니다"
+      }
+    }
+  },
   "settings": {
     "title": "설정",
     "output": {
@@ -133,6 +218,56 @@
       "permissionPending": "마이크 접근을 허용하세요",
       "noInput": "입력 장치를 열 수 없습니다"
     }
+  },
+  "fretboard": {
+    "board": "지판",
+    "scroll": "지판 스크롤",
+    "root": "루트",
+    "marker": {
+      "position": "{{string}}번 줄 {{fret}}프렛",
+      "degree": "도수 {{interval}}"
+    },
+    "instrument": {
+      "label": "악기",
+      "guitar6": "기타 6현",
+      "bass4": "베이스 4현",
+      "bass5": "베이스 5현"
+    },
+    "key": "키",
+    "scale": "스케일",
+    "scaleGroups": {
+      "basic": "기본",
+      "pentatonic": "펜타토닉·블루스",
+      "modes": "모드",
+      "other": "그 외"
+    },
+    "scales": {
+      "major": "메이저",
+      "naturalMinor": "내추럴 마이너",
+      "harmonicMinor": "하모닉 마이너",
+      "melodicMinor": "멜로딕 마이너",
+      "majorPentatonic": "메이저 펜타토닉",
+      "minorPentatonic": "마이너 펜타토닉",
+      "blues": "블루스",
+      "majorBlues": "메이저 블루스",
+      "ionian": "이오니안",
+      "dorian": "도리안",
+      "phrygian": "프리지안",
+      "lydian": "리디안",
+      "mixolydian": "믹솔리디안",
+      "aeolian": "에올리안",
+      "locrian": "로크리안",
+      "phrygianDominant": "프리지안 도미넌트",
+      "lydianDominant": "리디안 도미넌트",
+      "wholeTone": "온음음계"
+    },
+    "display": {
+      "label": "표시",
+      "notes": "음이름",
+      "intervals": "음정"
+    },
+    "frets": "프렛",
+    "leftHanded": "왼손잡이"
   },
   "stems": {
     "percent": "{{value}}%",
