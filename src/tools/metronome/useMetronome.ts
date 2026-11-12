@@ -23,6 +23,16 @@ export interface Heard {
 
 const NOTHING_HEARD: Heard = { beat: null, pulse: null };
 
+/**
+ * Drops what is shown from `fromFrame` on: those beats will not play (an
+ * output switch resets from 0). Earlier ones stay lit.
+ */
+export function retractHeard(heard: Heard, fromFrame: number): Heard {
+  const beat = heard.beat && heard.beat.frame >= fromFrame ? null : heard.beat;
+  const pulse = heard.pulse && heard.pulse.frame >= fromFrame ? null : heard.pulse;
+  return beat === heard.beat && pulse === heard.pulse ? heard : { beat, pulse };
+}
+
 /** Settings, presets and playback, with beats lit when they are heard. */
 export function useMetronome() {
   const [settings, setSettings] = useState<MetronomeSettings>(DEFAULT_SETTINGS);
@@ -44,6 +54,7 @@ export function useMetronome() {
           break;
         case "reset":
           queue.current.reset(message.fromFrame);
+          setHeard((previous) => retractHeard(previous, message.fromFrame));
           break;
         case "stopped":
           queue.current.clear();
