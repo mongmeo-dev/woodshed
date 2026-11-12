@@ -10,8 +10,8 @@ use rtrb::Consumer;
 use super::clock::{ClockPair, event_heard_at_epoch_ms, heard_at_epoch_ms};
 use super::core::{EngineConfig, create_engine};
 use super::device::{
-    AudioError, CoreCell, Direction, OutputStream, OutputStreamInfo, StreamErrorKind, find_device,
-    nanos, open_output_stream,
+    AudioError, CoreCell, Direction, OutputStream, OutputStreamInfo, StreamErrorKind,
+    build_output_stream, find_device, nanos,
 };
 use super::handle::EngineHandle;
 use super::shared::EngineStats;
@@ -89,12 +89,21 @@ impl AudioEngine {
 
     /// Opens (or switches to) an output device. Sources, scheduled events and
     /// the frame clock carry over; sources are re-prepared for the new format.
+    ///
+    /// The new stream is built before the running one is touched: if the
+    /// device cannot be found or the stream cannot be built, the current
+    /// output keeps playing unchanged and no new generation starts.
     pub fn open_output(&mut self, request: &OutputRequest) -> Result<OutputStreamInfo, AudioError> {
         let device = find_device(request.device_id.as_deref(), Direction::Output)?;
-        self.close_output();
         let (output, format) =
-            open_output_stream(&device, &self.cell, request.target_buffer_frames)?;
+            build_output_stream(&device, &self.cell, request.target_buffer_frames)?;
+        // Stop the old stream first: its callback releases the core, so the
+        // reformat below has exclusive access and the new stream starts on
+        // the new format.
+        self.close_output();
+        self.cell.with_core(|core| core.reformat(format));
         self.handle.set_format(format);
+        output.stream.play()?;
         let info = output.info.clone();
         self.output = Some(output);
         Ok(info)

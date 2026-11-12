@@ -306,17 +306,18 @@ pub(crate) struct OutputStream {
     pub(crate) error: Arc<AtomicU32>,
 }
 
-/// Opens `device` with the smallest workable buffer of at least
-/// `target_buffer_frames` frames and starts rendering
-/// `cell`'s core. The core is reformatted to the device's format first.
-pub(crate) fn open_output_stream(
+/// Builds (but does not start) an output stream on `device` with the smallest
+/// workable buffer of at least `target_buffer_frames` frames, wired to render
+/// `cell`'s core. Nothing else changes, so on failure the running output keeps
+/// playing; on success the caller stops the old stream, reformats the core to
+/// the returned format and then calls `play`.
+pub(crate) fn build_output_stream(
     device: &Device,
     cell: &Arc<CoreCell>,
     target_buffer_frames: u32,
 ) -> Result<(OutputStream, StreamFormat), AudioError> {
     let supported = pick_config(device, Direction::Output)?;
     let format = StreamFormat::new(supported.sample_rate(), supported.channels());
-    cell.with_core(|core| core.reformat(format));
 
     let error = Arc::new(AtomicU32::new(0));
     let mut last_error = None;
@@ -337,7 +338,6 @@ pub(crate) fn open_output_stream(
         };
         match built {
             Ok(stream) => {
-                stream.play()?;
                 let info = OutputStreamInfo {
                     device_id: device_id_string(device).unwrap_or_default(),
                     device_name: device_name(device),
