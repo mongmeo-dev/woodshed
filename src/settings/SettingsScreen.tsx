@@ -60,7 +60,7 @@ function useHeardBeat() {
 
   useEffect(() => {
     const stop = onPlaybackEvent((event) => {
-      if (event.renderedFrame !== pendingFrame.current || event.heardAtMs === null) return;
+      if (event.renderedFrame !== pendingFrame.current) return;
       pendingFrame.current = null;
       const showAt = window.setTimeout(() => {
         setBeat((count) => count + 1);

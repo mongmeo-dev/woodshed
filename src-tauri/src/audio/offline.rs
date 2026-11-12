@@ -41,6 +41,14 @@ impl OfflineEngine {
         self.core.format()
     }
 
+    /// Switches the render format, as the live engine does when it opens a
+    /// different output. Starts a new generation; queued sources are prepared
+    /// for the new format.
+    pub fn reformat(&mut self, format: StreamFormat) {
+        self.core.reformat(format);
+        self.handle.set_format(format);
+    }
+
     /// Renders `frames` frames as a series of `callback_frames`-sized device
     /// callbacks (the last one may be shorter) and returns them interleaved.
     pub fn render(&mut self, frames: usize, callback_frames: usize) -> Vec<f32> {

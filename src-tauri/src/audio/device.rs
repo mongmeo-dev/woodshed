@@ -1,4 +1,4 @@
-//! cpal glue: device listing, choosing the smallest buffer a device allows,
+//! cpal glue: device listing, choosing the smallest buffer (≥ the 64-frame floor) a device allows,
 //! and the output stream that renders an [`EngineCore`].
 
 use std::cell::UnsafeCell;
@@ -124,9 +124,11 @@ pub(crate) fn find_device(id: Option<&str>, direction: Direction) -> Result<Devi
     }
 }
 
-/// Buffer sizes to try, smallest first: the device minimum (but not below
-/// `target`), then common fallbacks inside the device range, then `None` for
-/// the backend default.
+/// Buffer sizes to try, smallest first. `target` is a floor, not a wish: the
+/// first candidate is the smallest size the device allows that is at least
+/// `target` (the app uses 64 frames — about 1.3 ms at 48 kHz — because smaller
+/// sizes risk dropouts on some devices). Then common fallbacks inside the
+/// device range, then `None` for the backend default.
 pub(crate) fn buffer_candidates(range: SupportedBufferSize, target: u32) -> Vec<Option<u32>> {
     let mut candidates = Vec::new();
     match range {
@@ -297,7 +299,8 @@ pub(crate) struct OutputStream {
     pub(crate) error: Arc<AtomicU32>,
 }
 
-/// Opens `device` with the smallest workable buffer and starts rendering
+/// Opens `device` with the smallest workable buffer of at least
+/// `target_buffer_frames` frames and starts rendering
 /// `cell`'s core. The core is reformatted to the device's format first.
 pub(crate) fn open_output_stream(
     device: &Device,

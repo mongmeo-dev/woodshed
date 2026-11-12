@@ -6,8 +6,9 @@
 //! - [`EngineHandle`]: UI-side API. Talks to the core only through a
 //!   lock-free SPSC queue (`rtrb`).
 //! - [`AudioEngine`]: owns the core and the cpal output stream, picks the
-//!   smallest buffer the device allows and switches devices without losing
-//!   sources or the frame clock.
+//!   smallest buffer of at least 64 frames that the device allows (the 64-frame
+//!   floor avoids per-device dropouts at tiny sizes) and switches devices
+//!   without losing sources or the frame clock.
 //! - [`OfflineEngine`]: renders the same core without a device, for tests.
 //! - [`open_input`]: input capture for the tuner; [`spawn_device_monitor`]:
 //!   device change hook.
@@ -31,7 +32,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use clock::{ClockPair, heard_at_epoch_ms};
+pub use clock::{ClockPair, event_heard_at_epoch_ms, heard_at_epoch_ms};
 pub use core::{EngineConfig, EngineCore, create_engine};
 pub use device::{
     AudioError, DeviceInfo, Direction, OutputStreamInfo, StreamErrorKind, list_devices,

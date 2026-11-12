@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use cpal::traits::StreamTrait;
 use rtrb::Consumer;
 
-use super::clock::{ClockPair, heard_at_epoch_ms};
+use super::clock::{ClockPair, event_heard_at_epoch_ms, heard_at_epoch_ms};
 use super::core::{EngineConfig, create_engine};
 use super::device::{
     AudioError, CoreCell, Direction, OutputStream, OutputStreamInfo, StreamErrorKind, find_device,
@@ -22,7 +22,7 @@ use super::types::{FramePos, RenderedEvent, StreamFormat};
 pub struct OutputRequest {
     /// Persisted device id, or `None` for the system default output.
     pub device_id: Option<String>,
-    /// Buffer size to aim for; the device minimum wins if it is larger.
+    /// Smallest buffer to use (a floor); the device minimum wins if it is larger.
     pub target_buffer_frames: u32,
 }
 
@@ -135,6 +135,19 @@ impl AudioEngine {
             std::thread::sleep(Duration::from_millis(5));
         }
         None
+    }
+
+    /// Output generation; changes whenever an output stream is (re)opened.
+    pub fn generation(&self) -> u64 {
+        self.handle.generation()
+    }
+
+    /// Unix-epoch milliseconds at which a rendered event is heard. `None` for
+    /// events from an older generation or when no output is running.
+    pub fn event_heard_at_epoch_ms(&self, event: &RenderedEvent) -> Option<f64> {
+        let output = self.output.as_ref()?;
+        let clock = ClockPair::now(nanos(output.stream.now().as_nanos()));
+        event_heard_at_epoch_ms(event, self.generation(), clock)
     }
 
     /// Unix-epoch milliseconds at which `frame` is heard, or `None` when no

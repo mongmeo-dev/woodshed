@@ -11,7 +11,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::shared::TimingSnapshot;
-use super::types::FramePos;
+use super::types::{FramePos, RenderedEvent};
 
 /// The stream clock and the system clock sampled at (nearly) the same moment.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,4 +38,18 @@ impl ClockPair {
 pub fn heard_at_epoch_ms(snapshot: &TimingSnapshot, clock: ClockPair, frame: FramePos) -> f64 {
     let offset_ns = snapshot.playback_ns_of(frame) - i128::from(clock.stream_now_ns);
     clock.epoch_now_ms + offset_ns as f64 / 1_000_000.0
+}
+
+/// Unix-epoch milliseconds at which a rendered event is heard, from the
+/// playback time captured when it was rendered. `None` when the event belongs
+/// to an older output generation (its stream is gone, so its time is unknown).
+pub fn event_heard_at_epoch_ms(
+    event: &RenderedEvent,
+    current_generation: u64,
+    clock: ClockPair,
+) -> Option<f64> {
+    (event.generation == current_generation).then(|| {
+        let offset_ns = i128::from(event.playback_ns) - i128::from(clock.stream_now_ns);
+        clock.epoch_now_ms + offset_ns as f64 / 1_000_000.0
+    })
 }

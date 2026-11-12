@@ -75,19 +75,29 @@ pub struct EngineCore {
     channels: usize,
     frame: FramePos,
     commands: Consumer<Command>,
-    /// Removed sources travel back here so they are freed off the audio thread.
+    /// Removed (or rejected) sources travel back here so they are freed off
+    /// the audio thread. Its capacity is `max_sources`, and the handle never
+    /// lets more than `max_sources` sources exist on the audio side, so every
+    /// source always has a way back.
     retired: Producer<Box<dyn Source>>,
     notify: Producer<RenderedEvent>,
     shared: Arc<SharedState>,
     sources: Vec<Slot>,
-    /// Sources removed while `retired` was full; retried every callback.
-    retiring: Vec<Box<dyn Source>>,
+    /// Sources waiting for a free slot in `retired` (bounded by the same
+    /// `max_sources` invariant, so pushing here never reallocates).
+    parked: Vec<Box<dyn Source>>,
     /// Pending events sorted by frame, latest first, so the next one is `last()`.
     events: Vec<ScheduledEvent>,
     mix: Vec<f32>,
     scratch: Vec<f32>,
     master_gain: f32,
     gain_coeff: f32,
+    /// Output generation this core renders for (mirrors `SharedState`).
+    generation: u64,
+    /// Frame and timing at the start of the current callback, used to stamp
+    /// rendered-event reports with their playback time.
+    callback_frame: FramePos,
+    callback_timing: CallbackTiming,
 }
 
 /// Creates an engine: the UI-side handle, the render core, and the queue of
@@ -115,14 +125,20 @@ pub fn create_engine(
         notify: notify_tx,
         shared: Arc::clone(&shared),
         sources: Vec::with_capacity(config.max_sources),
-        retiring: Vec::with_capacity(config.max_sources),
+        parked: Vec::with_capacity(config.max_sources),
         events: Vec::with_capacity(config.max_events),
         mix: vec![0.0; MAX_BLOCK_FRAMES * MAX_CHANNELS],
         scratch: vec![0.0; MAX_BLOCK_FRAMES * MAX_CHANNELS],
         master_gain: 1.0,
         gain_coeff: gain_coeff(format.sample_rate),
+        generation: shared.generation(),
+        callback_frame: 0,
+        callback_timing: CallbackTiming {
+            callback_ns: 0,
+            playback_ns: 0,
+        },
     };
-    let handle = EngineHandle::new(command_tx, retired_rx, shared, format);
+    let handle = EngineHandle::new(command_tx, retired_rx, shared, format, config.max_sources);
     (handle, core, notify_rx)
 }
 
@@ -145,13 +161,22 @@ impl EngineCore {
     /// thread, while no stream is rendering this core.
     pub fn reformat(&mut self, format: StreamFormat) {
         assert!((1..=MAX_CHANNELS).contains(&usize::from(format.channels)));
+        // Apply commands that were queued for the old format first, so sources
+        // still waiting in the queue are prepared for the new one below.
+        self.drain_commands();
+        self.retry_parked();
         self.format = format;
         self.channels = usize::from(format.channels);
         self.gain_coeff = gain_coeff(format.sample_rate);
-        self.shared.set_sample_rate(format.sample_rate);
         for slot in &mut self.sources {
             slot.source.prepare(format);
         }
+        self.generation = self.shared.begin_generation(format.sample_rate);
+    }
+
+    /// Output generation this core renders for.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Renders one device callback into `out` (interleaved, `format.channels`
@@ -162,7 +187,10 @@ impl EngineCore {
     {
         let channels = self.channels;
         let total_frames = out.len() / channels;
-        self.shared.publish_timing(self.frame, timing);
+        self.shared
+            .publish_timing(self.generation, self.format.sample_rate, self.frame, timing);
+        self.callback_frame = self.frame;
+        self.callback_timing = timing;
         self.drain_commands();
 
         for chunk in out.chunks_mut(MAX_BLOCK_FRAMES * channels) {
@@ -174,7 +202,7 @@ impl EngineCore {
             }
         }
 
-        self.retry_retiring();
+        self.retry_parked();
         self.shared
             .publish_rendered(self.frame, u32::try_from(total_frames).unwrap_or(u32::MAX));
     }
@@ -191,7 +219,8 @@ impl EngineCore {
                             target_gain: gain,
                         });
                     } else {
-                        self.shared.count_dropped_command();
+                        // Unreachable while the handle's admission check holds;
+                        // hand the source back rather than dropping it here.
                         self.retire(source);
                     }
                 }
@@ -228,20 +257,17 @@ impl EngineCore {
 
     fn retire(&mut self, source: Box<dyn Source>) {
         if let Err(rtrb::PushError::Full(source)) = self.retired.push(source) {
-            if self.retiring.len() < self.retiring.capacity() {
-                self.retiring.push(source);
-            } else {
-                // Both the queue and the backlog are full: leaking is the only
-                // option that keeps the audio thread free of deallocation.
-                std::mem::forget(source);
-            }
+            // At most `max_sources` sources exist on this side (handle
+            // admission), so `parked` never grows past its capacity.
+            debug_assert!(self.parked.len() < self.parked.capacity());
+            self.parked.push(source);
         }
     }
 
-    fn retry_retiring(&mut self) {
-        while let Some(source) = self.retiring.pop() {
+    fn retry_parked(&mut self) {
+        while let Some(source) = self.parked.pop() {
             if let Err(rtrb::PushError::Full(source)) = self.retired.push(source) {
-                self.retiring.push(source);
+                self.parked.push(source);
                 break;
             }
         }
@@ -284,11 +310,16 @@ impl EngineCore {
         slot.source.on_event(&event.kind);
         if event.notify {
             // A full report queue only costs the UI a notification.
+            let since_callback = rendered_frame.saturating_sub(self.callback_frame);
+            let offset_ns = since_callback.saturating_mul(1_000_000_000)
+                / u64::from(self.format.sample_rate.max(1));
             let _ = self.notify.push(RenderedEvent {
                 scheduled_frame: event.frame,
                 rendered_frame,
                 target: event.target,
                 kind: event.kind,
+                generation: self.generation,
+                playback_ns: self.callback_timing.playback_ns.saturating_add(offset_ns),
             });
         }
     }

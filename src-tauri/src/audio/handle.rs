@@ -13,6 +13,8 @@ use super::types::{EventKind, FramePos, ScheduledEvent, SourceId, StreamFormat};
 pub enum EngineError {
     #[error("the engine command queue is full")]
     QueueFull,
+    #[error("the mixer already holds the maximum number of sources")]
+    MixerFull,
 }
 
 /// Sends commands to the audio thread. Lives on a normal thread (behind a
@@ -23,6 +25,11 @@ pub struct EngineHandle {
     shared: Arc<SharedState>,
     format: StreamFormat,
     next_id: u32,
+    /// Sources handed to the audio side and not yet returned through
+    /// `retired`. Kept at or below `max_sources` so the audio thread always
+    /// has room to send every source back (it never frees one itself).
+    live_sources: usize,
+    max_sources: usize,
 }
 
 impl EngineHandle {
@@ -31,6 +38,7 @@ impl EngineHandle {
         retired: Consumer<Box<dyn Source>>,
         shared: Arc<SharedState>,
         format: StreamFormat,
+        max_sources: usize,
     ) -> Self {
         Self {
             commands,
@@ -38,6 +46,8 @@ impl EngineHandle {
             shared,
             format,
             next_id: 1,
+            live_sources: 0,
+            max_sources,
         }
     }
 
@@ -53,6 +63,12 @@ impl EngineHandle {
         &self.shared
     }
 
+    /// Output generation; changes whenever the output stream is (re)opened.
+    /// Frames scheduled against an older sample rate should be rescheduled.
+    pub fn generation(&self) -> u64 {
+        self.shared.generation()
+    }
+
     fn send(&mut self, command: Command) -> Result<(), EngineError> {
         self.collect_retired();
         self.commands
@@ -60,25 +76,38 @@ impl EngineHandle {
             .map_err(|_| EngineError::QueueFull)
     }
 
-    /// Frees sources the audio thread has detached. Called by every command;
-    /// call it yourself if you go a long time without sending commands.
+    /// Frees sources the audio thread has handed back. Called by every
+    /// command; call it yourself if you go a long time without sending one.
     pub fn collect_retired(&mut self) {
         while let Ok(source) = self.retired.pop() {
+            self.live_sources = self.live_sources.saturating_sub(1);
             drop(source);
         }
     }
 
+    /// Sources currently owned by the audio side (attached or in flight).
+    pub fn live_sources(&self) -> usize {
+        self.live_sources
+    }
+
     /// Prepares `source` for the current format (on this thread) and attaches
-    /// it to the mixer with `gain` (linear, 1.0 = unity).
+    /// it to the mixer with `gain` (linear, 1.0 = unity). Fails with
+    /// [`EngineError::MixerFull`] when `max_sources` sources are live; the
+    /// source is then dropped here, on the calling thread.
     pub fn add_source(
         &mut self,
         mut source: Box<dyn Source>,
         gain: f32,
     ) -> Result<SourceId, EngineError> {
+        self.collect_retired();
+        if self.live_sources >= self.max_sources {
+            return Err(EngineError::MixerFull);
+        }
         source.prepare(self.format);
         let id = SourceId(self.next_id);
-        self.next_id += 1;
         self.send(Command::AddSource { id, source, gain })?;
+        self.next_id += 1;
+        self.live_sources += 1;
         Ok(id)
     }
 
@@ -149,6 +178,7 @@ impl EngineHandle {
         self.frames_rendered() + self.format.frames_for_secs(lead_secs)
     }
 
+    /// Latest callback timing of the current generation.
     pub fn timing(&self) -> Option<TimingSnapshot> {
         self.shared.timing()
     }

@@ -34,9 +34,11 @@ pub struct PlaybackEvent {
     pub scheduled_frame: FramePos,
     pub rendered_frame: FramePos,
     pub kind: EventKind,
+    /// Output generation it was rendered in (always the current one when sent).
+    pub generation: u64,
     /// Unix-epoch ms. In the webview: `heardAtMs - performance.timeOrigin`
     /// is the `performance.now()` value at which the sound is heard.
-    pub heard_at_ms: Option<f64>,
+    pub heard_at_ms: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -188,17 +190,27 @@ fn spawn_notifier(
                 }
                 let events: Vec<PlaybackEvent> = {
                     let engine = lock(&engine);
+                    // Reports from an older output generation describe a stream
+                    // that is gone; their heard time cannot be known, so they
+                    // are dropped instead of being mapped onto the new clock.
                     batch
                         .drain(..)
-                        .map(|event| PlaybackEvent {
-                            source_id: event.target,
-                            scheduled_frame: event.scheduled_frame,
-                            rendered_frame: event.rendered_frame,
-                            kind: event.kind,
-                            heard_at_ms: engine.heard_at_epoch_ms(event.rendered_frame),
+                        .filter_map(|event| {
+                            let heard_at_ms = engine.event_heard_at_epoch_ms(&event)?;
+                            Some(PlaybackEvent {
+                                source_id: event.target,
+                                scheduled_frame: event.scheduled_frame,
+                                rendered_frame: event.rendered_frame,
+                                kind: event.kind,
+                                generation: event.generation,
+                                heard_at_ms,
+                            })
                         })
                         .collect()
                 };
+                if events.is_empty() {
+                    continue;
+                }
                 let mut subscribers = lock(&subscribers);
                 subscribers
                     .retain(|channel| events.iter().all(|e| channel.send(e.clone()).is_ok()));

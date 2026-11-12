@@ -3,7 +3,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use cpal::SupportedBufferSize;
 
@@ -204,6 +204,8 @@ fn notify_reports_the_rendered_frame() {
             rendered_frame: 2_000,
             target: id,
             kind: trigger(1.0),
+            generation: 1,
+            playback_ns: 2_000 * 1_000_000_000 / u64::from(RATE),
         }]
     );
     assert_eq!(engine.handle.stats().late_events, 0);
@@ -329,22 +331,241 @@ fn removed_source_is_freed_by_the_handle_not_the_render_call() {
 }
 
 #[test]
-fn full_mixer_rejects_and_counts_extra_sources() {
+fn full_mixer_rejects_new_sources_on_the_calling_thread() {
     let config = EngineConfig {
         max_sources: 2,
         ..EngineConfig::default()
     };
     let mut engine = OfflineEngine::with_config(StreamFormat::new(RATE, 1), config);
-    for _ in 0..3 {
+    for _ in 0..2 {
         let id = engine
             .handle
             .add_source(Box::new(ConstantSource::new(0.1)), 1.0)
             .unwrap();
         engine.handle.schedule(0, id, EventKind::Start).unwrap();
     }
+    let rejected = engine
+        .handle
+        .add_source(Box::new(ConstantSource::new(0.1)), 1.0);
+    assert_eq!(rejected, Err(EngineError::MixerFull));
     let out = engine.render(8, 8);
     assert!((out[0] - 0.2).abs() < 1.0e-6);
-    assert_eq!(engine.handle.stats().dropped_commands, 1);
+}
+
+#[test]
+fn removing_a_source_frees_a_mixer_slot() {
+    let config = EngineConfig {
+        max_sources: 1,
+        command_capacity: 8,
+        ..EngineConfig::default()
+    };
+    let mut engine = OfflineEngine::with_config(StreamFormat::new(RATE, 1), config);
+    let first = engine
+        .handle
+        .add_source(Box::new(ImpulseSource::default()), 1.0)
+        .unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            engine
+                .handle
+                .add_source(Box::new(ImpulseSource::default()), 1.0),
+            Err(EngineError::MixerFull)
+        );
+    }
+    engine.handle.remove_source(first).unwrap();
+    engine.render(8, 8);
+    engine.handle.collect_retired();
+    assert_eq!(engine.handle.live_sources(), 0);
+    assert!(
+        engine
+            .handle
+            .add_source(Box::new(ImpulseSource::default()), 1.0)
+            .is_ok()
+    );
+}
+
+struct DropCounter(Arc<AtomicUsize>);
+
+impl Source for DropCounter {
+    fn on_event(&mut self, _: &EventKind) {}
+    fn render(&mut self, _: &mut [f32], _: usize) {}
+}
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn every_source_is_freed_on_the_handle_side_even_when_saturated() {
+    let config = EngineConfig {
+        max_sources: 4,
+        command_capacity: 64,
+        ..EngineConfig::default()
+    };
+    let mut engine = OfflineEngine::with_config(StreamFormat::new(RATE, 1), config);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut ids = Vec::new();
+    for _ in 0..7 {
+        if let Ok(id) = engine
+            .handle
+            .add_source(Box::new(DropCounter(Arc::clone(&drops))), 1.0)
+        {
+            ids.push(id);
+        }
+    }
+    assert_eq!(ids.len(), 4);
+    assert_eq!(
+        drops.load(Ordering::SeqCst),
+        3,
+        "rejected ones drop at once"
+    );
+    for &id in &ids {
+        engine.handle.remove_source(id).unwrap();
+    }
+    engine.render(64, 64);
+    assert_eq!(drops.load(Ordering::SeqCst), 3, "render frees nothing");
+    engine.handle.collect_retired();
+    assert_eq!(drops.load(Ordering::SeqCst), 7, "no source leaks");
+    assert_eq!(engine.handle.live_sources(), 0);
+}
+
+// ---- format changes ------------------------------------------------------------------
+
+/// Records the sample rate it was last prepared for.
+struct FormatProbe(Arc<AtomicU32>);
+
+impl Source for FormatProbe {
+    fn prepare(&mut self, format: StreamFormat) {
+        self.0.store(format.sample_rate, Ordering::SeqCst);
+    }
+    fn on_event(&mut self, _: &EventKind) {}
+    fn render(&mut self, _: &mut [f32], _: usize) {}
+}
+
+#[test]
+fn source_queued_before_the_first_output_is_prepared_for_its_format() {
+    // The app adds its test sound before any output exists, then opens a
+    // 44.1 kHz device.
+    let mut engine = OfflineEngine::new(StreamFormat::new(48_000, 2));
+    let rate = Arc::new(AtomicU32::new(0));
+    engine
+        .handle
+        .add_source(Box::new(FormatProbe(Arc::clone(&rate))), 1.0)
+        .unwrap();
+    assert_eq!(rate.load(Ordering::SeqCst), 48_000);
+    engine.reformat(StreamFormat::new(44_100, 2));
+    assert_eq!(rate.load(Ordering::SeqCst), 44_100);
+}
+
+#[test]
+fn attached_and_queued_sources_are_both_reprepared_on_a_switch() {
+    let mut engine = OfflineEngine::new(StreamFormat::new(48_000, 2));
+    let attached = Arc::new(AtomicU32::new(0));
+    let queued = Arc::new(AtomicU32::new(0));
+    engine
+        .handle
+        .add_source(Box::new(FormatProbe(Arc::clone(&attached))), 1.0)
+        .unwrap();
+    engine.render(128, 64);
+    engine
+        .handle
+        .add_source(Box::new(FormatProbe(Arc::clone(&queued))), 1.0)
+        .unwrap();
+    engine.reformat(StreamFormat::new(44_100, 1));
+    assert_eq!(attached.load(Ordering::SeqCst), 44_100);
+    assert_eq!(queued.load(Ordering::SeqCst), 44_100);
+    assert_eq!(engine.handle.format().sample_rate, 44_100);
+}
+
+#[test]
+fn click_pitch_follows_the_output_rate_after_a_queued_add() {
+    // Count zero crossings of a 1 kHz click rendered at 44.1 kHz.
+    let mut engine = OfflineEngine::new(StreamFormat::new(48_000, 1));
+    let id = engine
+        .handle
+        .add_source(Box::new(ClickSource::new(1_000.0, 1.0)), 1.0)
+        .unwrap();
+    engine.handle.schedule(0, id, trigger(1.0)).unwrap();
+    engine.reformat(StreamFormat::new(44_100, 1));
+    let out = engine.render(4_410, 441); // 100 ms
+    let rising = out
+        .windows(2)
+        .filter(|pair| pair[0] < 0.0 && pair[1] >= 0.0)
+        .count();
+    assert!((99..=101).contains(&rising), "{rising} cycles in 100 ms");
+}
+
+#[test]
+fn reformat_starts_a_new_generation_and_hides_old_timing() {
+    let mut engine = engine(2);
+    engine.render(480, 480);
+    let before = engine.handle.timing().unwrap();
+    assert_eq!(before.generation, 1);
+    assert_eq!(before.sample_rate, RATE);
+
+    engine.reformat(StreamFormat::new(44_100, 2));
+    assert_eq!(engine.handle.generation(), 2);
+    assert!(
+        engine.handle.timing().is_none(),
+        "no timing before the first new callback"
+    );
+
+    engine.render(441, 441);
+    let after = engine.handle.timing().unwrap();
+    assert_eq!(after.generation, 2);
+    assert_eq!(after.sample_rate, 44_100);
+    assert_eq!(after.block_frame, 480, "the frame clock carries over");
+}
+
+#[test]
+fn rendered_event_carries_its_generation_and_playback_time() {
+    let mut engine = engine(2);
+    let id = engine
+        .handle
+        .add_source(Box::new(ImpulseSource::default()), 1.0)
+        .unwrap();
+    engine
+        .handle
+        .schedule_notify(2_000, id, trigger(1.0))
+        .unwrap();
+    engine.render(4_000, 128);
+    let report = engine.take_notifications();
+    assert_eq!(report[0].generation, 1);
+    // Offline clock: frame f plays at f / rate seconds.
+    assert_eq!(
+        report[0].playback_ns,
+        2_000 * 1_000_000_000 / u64::from(RATE)
+    );
+}
+
+#[test]
+fn reports_from_an_older_generation_get_no_heard_time() {
+    let mut engine = engine(2);
+    let id = engine
+        .handle
+        .add_source(Box::new(ImpulseSource::default()), 1.0)
+        .unwrap();
+    engine
+        .handle
+        .schedule_notify(100, id, trigger(1.0))
+        .unwrap();
+    engine.render(256, 128);
+    // The switch happens before the notifier reads the report.
+    engine.reformat(StreamFormat::new(44_100, 2));
+    let report = engine.take_notifications();
+    let clock = ClockPair {
+        stream_now_ns: 0,
+        epoch_now_ms: 1_000.0,
+    };
+    assert_eq!(
+        event_heard_at_epoch_ms(&report[0], engine.handle.generation(), clock),
+        None
+    );
+    let heard = event_heard_at_epoch_ms(&report[0], 1, clock).unwrap();
+    let expected = 1_000.0 + 100.0 / f64::from(RATE) * 1_000.0;
+    assert!((heard - expected).abs() < 1.0e-3);
 }
 
 // ---- real-time safety ----------------------------------------------------------
@@ -420,6 +641,7 @@ fn offline_timing_snapshot_tracks_the_callback_start() {
 #[test]
 fn heard_time_adds_output_latency_and_frame_offset() {
     let snapshot = TimingSnapshot {
+        generation: 1,
         block_frame: 48_000,
         callback_ns: 5_000_000_000,
         playback_ns: 5_004_000_000, // 4 ms output latency

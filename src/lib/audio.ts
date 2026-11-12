@@ -22,12 +22,13 @@ export interface OutputStreamInfo {
 }
 
 export interface EngineStats {
+  /** Output generation; changes whenever the output stream is (re)opened. */
+  generation: number;
   framesRendered: number;
   callbacks: number;
   maxCallbackFrames: number;
   lateEvents: number;
   droppedEvents: number;
-  droppedCommands: number;
 }
 
 export interface AudioStatus {
@@ -49,8 +50,10 @@ export interface PlaybackEvent {
   scheduledFrame: number;
   renderedFrame: number;
   kind: EventKind;
+  /** Output generation it was rendered in. Reports from older generations are not sent. */
+  generation: number;
   /** Unix-epoch milliseconds; see {@link heardAtToPerformanceTime}. */
-  heardAtMs: number | null;
+  heardAtMs: number;
 }
 
 export interface ScheduledSound {
@@ -71,12 +74,12 @@ const EMPTY_STATUS: AudioStatus = {
   output: null,
   outputLatencyMs: null,
   stats: {
+    generation: 0,
     framesRendered: 0,
     callbacks: 0,
     maxCallbackFrames: 0,
     lateEvents: 0,
     droppedEvents: 0,
-    droppedCommands: 0,
   },
 };
 

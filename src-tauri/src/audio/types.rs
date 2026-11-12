@@ -83,6 +83,11 @@ pub struct RenderedEvent {
     pub rendered_frame: FramePos,
     pub target: SourceId,
     pub kind: EventKind,
+    /// Output generation the event was rendered in.
+    pub generation: u64,
+    /// Stream-clock time (ns) at which `rendered_frame` reaches the DAC,
+    /// captured when it was rendered. Only meaningful for `generation`.
+    pub playback_ns: u64,
 }
 
 /// Timing of the most recent device callback, on the stream's own clock.
