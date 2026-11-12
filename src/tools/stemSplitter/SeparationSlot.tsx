@@ -5,22 +5,29 @@ import { ProgressBar } from "./ProgressBar";
 interface SeparationSlotProps {
   /** Latest separation event for the open song, if any. */
   separation: SeparationEvent | null;
-  /** Starts separation. The stem engine wires this; without it no button shows. */
+  /** Starts separation; without it no button shows. */
   onSeparate?: () => void;
+  /** Cancels a running separation; without it no cancel button shows. */
+  onCancel?: () => void;
 }
 
 /** Where the separate button and the separation progress live. */
-export function SeparationSlot({ separation, onSeparate }: SeparationSlotProps) {
+export function SeparationSlot({ separation, onSeparate, onCancel }: SeparationSlotProps) {
   const { t } = useTranslation();
   if (separation?.state === "running") {
-    const percent = Math.round((separation.progress ?? 0) * 100);
+    const label =
+      separation.progress === null
+        ? t("stems.separation.preparing")
+        : t("stems.separation.running", { percent: Math.round(separation.progress * 100) });
     return (
       <div className="separation">
-        <span className="separation-label">{t("stems.separation.running", { percent })}</span>
-        <ProgressBar
-          label={t("stems.separation.running", { percent })}
-          value={separation.progress}
-        />
+        <span className="separation-label">{label}</span>
+        <ProgressBar label={label} value={separation.progress} />
+        {onCancel && (
+          <button type="button" className="button-secondary" onClick={onCancel}>
+            {t("stems.separation.cancel")}
+          </button>
+        )}
       </div>
     );
   }

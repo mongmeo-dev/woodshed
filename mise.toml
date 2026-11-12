@@ -27,6 +27,10 @@ run = [
 description = "Fetch yt-dlp and build ffmpeg (stem splitter sidecars)"
 run = "sh scripts/fetch-binaries.sh"
 
+[tasks.stem-model]
+description = "Download htdemucs_6s weights and build the Core ML stem model"
+run = "sh tools/stem-model/build.sh"
+
 [tasks.check]
 description = "Run every check (web, then rust)"
 run = [

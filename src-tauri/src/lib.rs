@@ -2,11 +2,14 @@ pub mod app_audio;
 pub mod audio;
 pub mod drums;
 pub mod metronome;
+pub mod separation;
 pub mod settings;
 pub mod stems;
 pub mod tuner;
 
-use tauri::{Manager, State};
+use std::sync::Arc;
+
+use tauri::{Emitter, Manager, State};
 
 use settings::{Settings, SettingsStore};
 
@@ -60,6 +63,20 @@ pub fn run() {
                 &data_dir,
                 app.path().app_cache_dir()?,
             ));
+            let events = app.handle().clone();
+            app.manage(separation::SeparationService::start(
+                stems::Library::new(&data_dir),
+                separation::app_model_loader(
+                    app.path().resource_dir().ok(),
+                    app.path().app_cache_dir().ok(),
+                ),
+                Arc::new(move |event| {
+                    if let Err(error) = events.emit(stems::SEPARATION_EVENT, event) {
+                        log::warn!("cannot send a separation event: {error}");
+                    }
+                }),
+                separation::ServiceConfig::APP,
+            ));
             let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
             app.manage(tuner);
             Ok(())
@@ -108,11 +125,15 @@ pub fn run() {
             stems::stems_set_master,
             stems::stems_transport,
             stems::stems_restore,
+            separation::stems_separate,
+            separation::stems_cancel_separation,
+            separation::stems_separations,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                app.state::<separation::SeparationService>().shutdown();
                 app.state::<stems::StemService>().shutdown();
                 app.state::<tuner::TunerService>().shutdown();
                 app.state::<app_audio::AudioService>().shutdown();

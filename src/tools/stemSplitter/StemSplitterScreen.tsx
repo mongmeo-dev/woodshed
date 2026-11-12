@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 import { subscribeAsync } from "../../lib/audio";
 import { inTauri } from "../../lib/ipc";
 import {
+  cancelSeparation,
   formatTime,
   isAudioFile,
-  onSeparation,
   pickAudioFile,
   type SeparationEvent,
+  separationFromStems,
+  stemsReady,
 } from "../../lib/stems";
 import { ImportBar } from "./ImportBar";
 import { Mixer } from "./Mixer";
@@ -15,6 +17,7 @@ import { SeparationSlot } from "./SeparationSlot";
 import { SongList } from "./SongList";
 import { useLibrary } from "./useLibrary";
 import { usePlayer } from "./usePlayer";
+import { useSeparations } from "./useSeparations";
 import { useAnimationFrame, Waveform } from "./Waveform";
 import "./stemSplitter.css";
 
@@ -83,7 +86,6 @@ export function StemSplitterScreen() {
   const { t } = useTranslation();
   const library = useLibrary();
   const player = usePlayer();
-  const [separations, setSeparations] = useState<Record<string, SeparationEvent>>({});
   const timeRef = useRef<HTMLSpanElement>(null);
   const autoOpened = useRef(false);
   const { opened, open, positionNow } = player;
@@ -129,19 +131,22 @@ export function StemSplitterScreen() {
     if (wasOpen) autoOpened.current = false;
   };
 
-  // Separation progress from the stem engine; a finished song reopens with its stems.
+  // Separation progress from the stem engine, for the screen's lifetime. A
+  // finished song that is open reopens at the same position with its stems.
   const refreshLibrary = library.refresh;
-  useEffect(() => {
-    return subscribeAsync(() =>
-      onSeparation((event) => {
-        setSeparations((current) => ({ ...current, [event.songId]: event }));
-        if (event.state === "done") {
-          void refreshLibrary();
-          if (event.songId === openId) void open(event.songId, positionNow());
-        }
-      }),
-    );
-  }, [refreshLibrary, openId, open, positionNow]);
+  /** The song the latest reopen-with-stems was for (one reopen per finish). */
+  const reopened = useRef<string | null>(null);
+  const { separations, start: startSeparation } = useSeparations({
+    onEvent: (event: SeparationEvent) => {
+      if (event.state === "running") return;
+      void refreshLibrary();
+      if (event.state === "done" && event.songId === openId) {
+        reopened.current = event.songId;
+        void open(event.songId, positionNow());
+      }
+    },
+    onReconciled: () => void refreshLibrary(),
+  });
 
   // Space toggles playback.
   const { togglePlay } = player;
@@ -175,6 +180,27 @@ export function StemSplitterScreen() {
   }, [t, positionNow, duration]);
   useAnimationFrame(player.playing, showTime);
   useEffect(showTime);
+
+  // The list has the latest manifest (refreshed on every finished separation).
+  const openSong = library.songs.find((song) => song.id === openId) ?? opened?.song ?? null;
+  const openReady = openSong ? stemsReady(openSong) : false;
+  const latest = openId ? separations[openId] : undefined;
+  // The screen only separates songs that are not ready, so a ready manifest
+  // wins over a running entry left from before.
+  const separation =
+    latest?.state === "running" && openReady
+      ? null
+      : (latest ?? (openSong ? separationFromStems(openSong) : null));
+  const separating = separation?.state === "running";
+
+  // A finish the screen missed (closed, or still subscribing): the list says
+  // ready while the player still has the original track.
+  const showingOriginal = opened?.tracks.length === 1 && opened.tracks[0] === "original";
+  useEffect(() => {
+    if (!openId || !openReady || !showingOriginal || reopened.current === openId) return;
+    reopened.current = openId;
+    void open(openId, positionNow());
+  }, [openId, openReady, showingOriginal, open, positionNow]);
 
   const speedPercent = Math.round(player.speed * 100);
   const loop = player.loop;
@@ -298,7 +324,17 @@ export function StemSplitterScreen() {
                       <h2 className="stems-section-title" id="stems-mixer">
                         {t("stems.mixer.title")}
                       </h2>
-                      <SeparationSlot separation={separations[opened.song.id] ?? null} />
+                      <SeparationSlot
+                        separation={separation}
+                        onSeparate={
+                          separating || separation?.state === "done" || openReady
+                            ? undefined
+                            : () => void startSeparation(opened.song.id)
+                        }
+                        onCancel={
+                          separating ? () => void cancelSeparation(opened.song.id) : undefined
+                        }
+                      />
                     </div>
                     <Mixer
                       tracks={opened.tracks}

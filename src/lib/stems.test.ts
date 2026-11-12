@@ -1,4 +1,14 @@
-import { formatTime, importErrorCode, isAudioFile, positionAt, youtubeVideoId } from "./stems";
+import {
+  formatTime,
+  importErrorCode,
+  isAudioFile,
+  positionAt,
+  STEM_NAMES,
+  type StemStatus,
+  separationFromStems,
+  stemsReady,
+  youtubeVideoId,
+} from "./stems";
 
 test("YouTube links resolve to their video id", () => {
   for (const link of [
@@ -64,4 +74,28 @@ test("import errors and file types are recognised", () => {
   expect(isAudioFile("/a/b/Song.MP3")).toBe(true);
   expect(isAudioFile("/a/b/song.m4a")).toBe(true);
   expect(isAudioFile("/a/b/notes.txt")).toBe(false);
+});
+
+test("a song is separated only when all its stems are ready", () => {
+  const song = (status: StemStatus, last: StemStatus = status) => ({
+    id: "s1",
+    stems: STEM_NAMES.map((name, i) => ({ name, status: i === 5 ? last : status })),
+  });
+  expect(stemsReady({ stems: [] })).toBe(false);
+  expect(stemsReady(song("ready"))).toBe(true);
+  expect(stemsReady(song("ready", "running"))).toBe(false);
+  expect(separationFromStems({ id: "s1", stems: [] })).toBeNull();
+  expect(separationFromStems(song("ready"))).toBeNull();
+  expect(separationFromStems(song("failed"))).toEqual({
+    songId: "s1",
+    state: "failed",
+    progress: null,
+  });
+  for (const status of ["pending", "running"] as const) {
+    expect(separationFromStems(song(status))).toEqual({
+      songId: "s1",
+      state: "running",
+      progress: null,
+    });
+  }
 });
