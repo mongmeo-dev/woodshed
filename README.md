@@ -28,6 +28,21 @@ mise exec -- pnpm tauri build
 # → src-tauri/target/release/bundle/macos/Woodshed.app
 ```
 
+### 스템 분리용 sidecar (yt-dlp, ffmpeg)
+
+YouTube 가져오기는 앱에 넣는 yt-dlp와 ffmpeg를 씁니다. 바이너리는 git에 넣지 않고 스크립트로 준비합니다.
+
+```sh
+mise run binaries   # = pnpm binaries = sh scripts/fetch-binaries.sh
+# → src-tauri/binaries/yt-dlp-<triple>, ffmpeg-<triple>
+```
+
+- yt-dlp: 공식 릴리스 `yt-dlp_macos`(universal) 2026.10.26을 받아 SHA-256을 확인합니다.
+- ffmpeg: ffmpeg.org 9.0.2 소스(SHA-256 고정)를 받아 오디오 전용 LGPL 구성(`--disable-gpl`, 외부 라이브러리 없음)으로 빌드합니다. 처음 한 번 1~2분 걸립니다.
+- 결과는 `~/Library/Caches/dev.mongmeo.woodshed/binaries`에 캐시되어 다음부터는 복사만 합니다. 다른 아키텍처는 `sh scripts/fetch-binaries.sh --target x86_64-apple-darwin`(또는 `universal-apple-darwin`).
+- `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 바이너리가 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 파일을 만들고, 앱은 YouTube 가져오기에서 도구를 찾을 수 없다는 오류만 보입니다. 실제로 내려받아 보려면 먼저 `mise run binaries`를 실행합니다.
+- 라이선스 고지(FFmpeg LGPL v2.1+ 전문과 소스 위치, yt-dlp)는 [`LICENSES/`](LICENSES/README.md)에 있고 앱 번들에 함께 들어갑니다.
+
 ## 검사
 
 ```sh
@@ -52,6 +67,10 @@ cd src-tauri && mise exec -- cargo run --release --example latency_probe
 - 모션 참고: [Kinetics](https://kinetics.colorion.co)의 Tab Pill Glide(선택 표시가 대상 크기를 재고 미끄러짐 — 0.4s를 240ms로 줄임), Pulse Badge(링이 커지며 사라짐 — 테스트음이 들리는 순간 한 번만 재생).
 
 ## 미결 사항
+
+- 스템 분리 실행(Demucs)은 stem-engine 작업에서 연결합니다. 화면에는 분리 버튼·진행률 자리만 있습니다(계약: [`AGENTS.md`](AGENTS.md#스템-라이브러리-계약-src-taurisrcstems)).
+- 번들한 `yt-dlp_macos`는 PyInstaller 묶음이라 결합 저작물로는 GPLv3+입니다(yt-dlp 자체는 Unlicense). 앱은 별도 프로세스로 실행만 합니다. 배포 방식을 정할 때 다시 확인합니다.
+- YouTube는 JS 런타임 없이 yt-dlp 기본 클라이언트로 받습니다. 일부 영상 형식이 막히면 JS 런타임(deno 등) 번들 여부를 정해야 합니다.
 
 - 마이크 권한 문구(`src-tauri/Info.plist`)는 영어 한 가지입니다. 현지화는 튜너 작업에서 정합니다.
 - 출력이 바뀌어 샘플레이트가 달라지면 이미 예약된 이벤트의 프레임 위치는 그대로라 시간상 위치가 달라집니다. 메트로놈·드럼·스템 플레이어는 `audio://output-changed`를 받아 다시 예약해야 합니다.

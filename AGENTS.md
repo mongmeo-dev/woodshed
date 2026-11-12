@@ -126,3 +126,57 @@ let reports = engine.take_notifications();
 
 - 오프라인 스트림 클럭은 0ns에서 시작하고 레이턴시 0입니다(프레임 f = f / sample_rate 초).
 - 검사용 소스: `audio::testing::{ImpulseSource, ConstantSource}`.
+
+## 스템 라이브러리 계약 (`src-tauri/src/stems/`)
+
+스템 분리 화면(stem-player)과 분리 엔진(stem-engine)이 이 계약을 공유합니다. 바꿔야 하면 멈추고 conductor에게 알립니다.
+
+### 디렉터리 (앱 데이터 `songs/<id>/`)
+
+- `manifest.json`: `Manifest`(camelCase JSON, 아래).
+- `original.<ext>`: 가져온 파일 원본 그대로입니다. YouTube는 yt-dlp가 받은 파일(`webm`·`m4a` 등)입니다. 분리 입력으로 씁니다.
+- `audio.wav`: 재생용 사본입니다. **16bit PCM WAV, 원본 샘플레이트 그대로, 1~2채널.**
+- `waveform.json`: 파형 요약입니다(구간별 피크, 0~255 정수 배열).
+- `stems/<name>.wav`: 분리 결과입니다. `<name>`은 `vocals`, `drums`, `bass`, `guitar`, `piano`, `other`. **형식은 `audio.wav`와 같게 맞춥니다: 16bit PCM WAV, manifest `sampleRate`와 같은 레이트, 1~2채널, 길이는 `frames`와 같게.** 레이트가 다르면 곡을 열지 못하고, 짧은 스템은 뒤가 무음으로 재생됩니다.
+- 가져오기는 `songs/.incoming/<id>/`에서 조립한 뒤 이름 바꾸기로 `songs/<id>/`에 놓습니다. 목록은 점(.)으로 시작하는 폴더를 건너뛰고, 앱을 시작할 때 `.incoming`을 비웁니다.
+
+### manifest
+
+```json
+{
+  "version": 1,
+  "id": "19a7…",
+  "title": "곡 제목",
+  "source": { "kind": "file", "fileName": "song.mp3" },
+  "original": "original.mp3",
+  "sampleRate": 44100,
+  "channels": 2,
+  "frames": 13230000,
+  "addedAtMs": 1794468000000,
+  "stems": [{ "name": "vocals", "status": "running" }]
+}
+```
+
+- `source`는 `{ "kind": "file", "fileName" }` 또는 `{ "kind": "youtube", "url", "videoId" }`입니다.
+- `stems`가 없거나 비어 있으면 분리 전입니다. `status`는 `pending` | `running` | `ready` | `failed`입니다.
+- stem-engine은 분리를 시작할 때 6개 항목을 `running`(또는 `pending`)으로 쓰고, 각 파일을 임시 이름으로 쓴 뒤 `stems/<name>.wav`로 이름을 바꾸고 `ready`로 바꿉니다. 실패하면 `failed`입니다.
+- 읽기·저장은 Rust `stems::Library`(`get`, `list`, `save`: 임시 파일 + 이름 바꾸기)와 `Manifest`, `StemName`, `StemStatus`, `StemEntry`를 씁니다.
+- 트랙 결정: 모든 항목이 `ready`일 때만 `Manifest::tracks()`가 스템 트랙을 `vocals → drums → bass → guitar → piano → other` 순서(manifest에 있는 것만)로 돌려주고, 그 전에는 `original`(`audio.wav`) 하나입니다. 믹서는 이 목록대로 트랙 수가 바뀝니다.
+
+### 화면 연결
+
+- 분리 실행 명령 `stems_separate({ songId })`는 stem-engine이 만듭니다. 화면의 `SeparationSlot`(`src/tools/stemSplitter/SeparationSlot.tsx`)에 `onSeparate`를 넘기면 버튼이 보이고, 지금은 넘기지 않아 숨겨져 있습니다.
+- 진행 이벤트 `stems://separation`(Rust `stems::SEPARATION_EVENT`, `SeparationEvent`): `{ songId, state: "running" | "done" | "failed", progress: 0.0~1.0 | null }`. 화면은 `running`이면 진행률, `failed`면 짧은 오류를 보이고, `done`이면 곡 목록을 다시 읽은 뒤 열린 곡이면 같은 위치에서 다시 엽니다(스템 트랙 믹서).
+- 플레이어는 곡을 열 때 트랙 파일을 열어 둡니다. 열린 곡의 `audio.wav`는 바꾸지 말고, 스템은 새 이름으로 쓴 뒤 이름을 바꿉니다.
+
+### 플레이어 (`StemPlayer`)
+
+- `StemPlayer::new(tracks, start)` → `StemSource`(엔진 `Source`) + `Feeder`(일반 스레드, `FeederThread`) + `PlayerShared`. 트랙은 최대 `MAX_TRACKS`(8)개, 모두 같은 샘플레이트입니다.
+- 제어는 엔진 예약 이벤트로만 보냅니다: `Start`, `Stop`, `Seek { frame }`(곡 프레임), `Param`(`stems::param`: `SPEED` 0.5~1.0, 트랙별 `VOLUME`/`MUTE`/`SOLO`), A-B 반복은 `loop_events(range)`. 마스터 볼륨은 소스 게인(`set_gain`)입니다.
+- 출력 레이트가 바뀌면 `Source::prepare`에서 같은 위치로 다시 시작합니다. 화면은 `audio://output-changed`에 `stems_resync`(대기 이벤트 취소) 후 재생 상태를 다시 맞춥니다.
+
+### Sidecar (yt-dlp, ffmpeg)
+
+- `src-tauri/binaries/{yt-dlp,ffmpeg}-<target triple>`은 git에 넣지 않습니다. `mise run binaries`(= `pnpm binaries`, `scripts/fetch-binaries.sh`)가 yt-dlp를 받고 ffmpeg(오디오 전용 LGPL 구성)를 빌드합니다. 버전·체크섬은 스크립트에 고정되어 있고, 결과는 `~/Library/Caches/dev.mongmeo.woodshed/binaries`에 캐시됩니다. `pnpm tauri build`는 `beforeBuildCommand`에서 이를 실행합니다.
+- 바이너리가 없으면 `src-tauri/build.rs`가 빈 자리표시 파일을 만들어 check·테스트·dev 빌드가 네트워크 없이 통과합니다. 이때 앱은 YouTube 가져오기에서 `toolsMissing` 오류만 보입니다.
+- 실행 파일 옆의 sidecar는 `stems::Tools::locate()`로 찾습니다. stem-engine이 ffmpeg를 쓰면 같은 방법으로 찾습니다. 라이선스 고지는 `LICENSES/`에 있고 앱 번들 `Resources/LICENSES/`에 들어갑니다.
