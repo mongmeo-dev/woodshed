@@ -3,6 +3,7 @@ import { SettingsProvider } from "./settings/SettingsProvider";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { Sidebar } from "./shell/Sidebar";
 import { ToolScreen } from "./shell/ToolScreen";
+import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import { StemSplitterScreen } from "./tools/stemSplitter/StemSplitterScreen";
 import type { ViewId } from "./tools/tools";
 
@@ -15,6 +16,8 @@ export function App() {
         <main>
           {view === "settings" ? (
             <SettingsScreen />
+          ) : view === "drumMachine" ? (
+            <DrumMachineScreen />
           ) : view === "stemSplitter" ? (
             <StemSplitterScreen />
           ) : (

@@ -1,5 +1,6 @@
 pub mod app_audio;
 pub mod audio;
+pub mod drums;
 pub mod settings;
 pub mod stems;
 
@@ -36,7 +37,9 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            let drums = drums::DrumService::start(audio.engine(), &data_dir)?;
             app.manage(audio);
+            app.manage(drums);
             app.manage(stems::StemService::new(
                 &data_dir,
                 app.path().app_cache_dir()?,
@@ -52,6 +55,12 @@ pub fn run() {
             app_audio::audio_subscribe,
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
+            drums::service::drums_state,
+            drums::service::drums_set_playing,
+            drums::service::drums_set_pattern,
+            drums::service::drums_subscribe,
+            drums::service::drums_save_pattern,
+            drums::service::drums_delete_pattern,
             stems::stems_list,
             stems::stems_pick_file,
             stems::stems_import_file,
