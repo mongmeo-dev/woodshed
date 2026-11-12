@@ -5,6 +5,7 @@ pub mod input;
 pub mod mpm;
 pub mod notes;
 pub mod permission;
+pub mod pump;
 pub mod service;
 
 #[cfg(test)]

@@ -19,14 +19,16 @@ use super::analyzer::{Analyzer, Reading};
 use super::input::{InputDevices, InputEnv, InputSupervisor, ListedInput, OpenedInput};
 use super::notes::clamp_reference;
 use super::permission::{self, MicPermission};
+use super::pump::InputPump;
 use crate::app_audio::DEVICES_CHANGED_EVENT;
 use crate::audio::{Direction, InputCapture, InputChannel, InputRequest, list_devices, open_input};
 use crate::settings::SettingsStore;
 
 /// Input buffer the tuner asks for (frames).
 const INPUT_BUFFER_FRAMES: u32 = 64;
-/// Ring between the input callback and this thread: over a second of audio,
-/// so a stalled analysis loses nothing.
+/// Ring between the input callback and this thread (over a second of audio).
+/// The pump analyses at most the newest 100 ms of it and treats an overflow
+/// as a gap (`pump.rs`).
 const RING_FRAMES: usize = 1 << 16;
 /// Polling interval of the analysis thread (the callback delivers ~1.3 ms).
 const POLL: Duration = Duration::from_millis(1);
@@ -307,7 +309,7 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
     let mut asked = false;
     let mut started = false;
     let mut next_permission_check = Instant::now();
-    let mut analyzer: Option<Analyzer> = None;
+    let mut pump: Option<InputPump> = None;
     let mut generation = 0;
     let mut frames = FrameSender {
         last_sent: None,
@@ -371,24 +373,24 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
 
             if supervisor.generation() != generation {
                 generation = supervisor.generation();
-                analyzer = supervisor
-                    .opened()
-                    .map(|opened| Analyzer::new(opened.sample_rate, f64::from(reference_hz)));
+                let overflows = supervisor
+                    .capture_mut()
+                    .map_or(0, |capture| capture.shared.overflows());
+                pump = supervisor.opened().map(|opened| {
+                    let analyzer = Analyzer::new(opened.sample_rate, f64::from(reference_hz));
+                    InputPump::new(analyzer, overflows)
+                });
                 last_progress = (0, now);
             }
 
             let mut failed = false;
-            if let (Some(capture), Some(analyzer)) = (supervisor.capture_mut(), analyzer.as_mut()) {
-                analyzer.set_reference(f64::from(reference_hz));
-                let available = capture.samples.slots();
-                if let Ok(chunk) = capture.samples.read_chunk(available) {
-                    let (first, second) = chunk.as_slices();
-                    for part in [first, second] {
-                        analyzer.push(part, |frame| {
-                            frames.offer(shared, frame.level_db, frame.pitch);
-                        });
-                    }
-                    chunk.commit_all();
+            if let (Some(capture), Some(pump)) = (supervisor.capture_mut(), pump.as_mut()) {
+                pump.analyzer_mut().set_reference(f64::from(reference_hz));
+                // Only the newest analysis step of this poll is sent: older
+                // ones describe audio the screen has no use for any more.
+                let overflows = capture.shared.overflows();
+                if let Some(frame) = pump.pump(&mut capture.samples, overflows) {
+                    frames.offer(shared, frame.level_db, frame.pitch);
                 }
                 if capture
                     .shared
