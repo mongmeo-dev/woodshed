@@ -101,7 +101,30 @@ export function listDevices(direction: "input" | "output"): Promise<DeviceInfo[]
   return call("audio_list_devices", { direction }, []);
 }
 
-/** Switches the output device; `null` follows the system default. */
+/** Why choosing an output failed (mirrors `OutputSelectError` in app_audio.rs). */
+export type OutputSelectError =
+  | { code: "openFailed"; message: string }
+  | { code: "saveFailed"; message: string }
+  | { code: "unavailable" };
+
+const SELECT_ERROR_CODES = new Set(["openFailed", "saveFailed", "unavailable"]);
+
+/** Reads the error code of a rejected {@link setOutputDevice}. */
+export function outputSelectErrorCode(error: unknown): OutputSelectError["code"] {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const { code } = error as { code: unknown };
+    if (typeof code === "string" && SELECT_ERROR_CODES.has(code)) {
+      return code as OutputSelectError["code"];
+    }
+  }
+  return "unavailable";
+}
+
+/**
+ * Asks the output manager to switch the output (`null` follows the system
+ * default) and save the choice. Rejects with an {@link OutputSelectError};
+ * on `openFailed` and `saveFailed` the choice is still in effect.
+ */
 export function setOutputDevice(deviceId: string | null): Promise<AudioStatus> {
   return call("audio_set_output_device", { deviceId }, EMPTY_STATUS);
 }

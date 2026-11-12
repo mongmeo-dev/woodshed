@@ -7,9 +7,11 @@ import {
   delayUntilHeard,
   getAudioStatus,
   listDevices,
+  type OutputSelectError,
   onDevicesChanged,
   onOutputChanged,
   onPlaybackEvent,
+  outputSelectErrorCode,
   playTestSound,
   setOutputDevice,
   subscribeAsync,
@@ -108,22 +110,24 @@ function formatNumber(value: number, language: string, digits = 0) {
 
 export function SettingsScreen() {
   const { t, i18n } = useTranslation();
-  const { settings, update, saveFailed } = useSettings();
+  const { settings, update, applyLocal, saveFailed } = useSettings();
   const { status, setStatus, devices } = useAudioStatus();
   const { beat, play } = useHeardBeat();
-  const [outputError, setOutputError] = useState(false);
+  const [outputError, setOutputError] = useState<OutputSelectError["code"] | null>(null);
   const language = i18n.language;
   const output = status?.output ?? null;
 
   const changeDevice = async (value: string) => {
     const deviceId = value === SYSTEM_DEFAULT ? null : value;
+    let code: OutputSelectError["code"] | null = null;
     try {
       setStatus(await setOutputDevice(deviceId));
-      setOutputError(false);
-      await update({ outputDeviceId: deviceId });
-    } catch {
-      setOutputError(true);
+    } catch (error) {
+      code = outputSelectErrorCode(error);
     }
+    setOutputError(code);
+    // The app saved the choice (or keeps it in effect when saving failed).
+    if (code !== "unavailable") applyLocal({ outputDeviceId: deviceId });
   };
 
   const languageOptions = [
@@ -169,10 +173,19 @@ export function SettingsScreen() {
                   ))}
                 </select>
               </div>
-              {(outputError || (status && !output)) && (
+              {(outputError === "openFailed" ||
+                outputError === "unavailable" ||
+                (status && !output)) && (
                 <div className="row">
                   <span className="row-error" role="alert">
                     {t("settings.output.notAvailable")}
+                  </span>
+                </div>
+              )}
+              {outputError === "saveFailed" && (
+                <div className="row">
+                  <span className="row-error" role="alert">
+                    {t("settings.saveFailed")}
                   </span>
                 </div>
               )}

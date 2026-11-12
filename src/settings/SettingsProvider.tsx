@@ -23,6 +23,8 @@ interface SettingsContextValue {
   loaded: boolean;
   saveFailed: boolean;
   update: (patch: Partial<Settings>) => Promise<void>;
+  /** Reflects a value the app already saved elsewhere, without saving again. */
+  applyLocal: (patch: Partial<Settings>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -68,9 +70,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const applyLocal = useCallback((patch: Partial<Settings>) => {
+    const next = { ...latest.current, ...patch };
+    latest.current = next;
+    setSettings(next);
+    apply(next);
+  }, []);
+
   const value = useMemo(
-    () => ({ settings, loaded, saveFailed, update }),
-    [settings, loaded, saveFailed, update],
+    () => ({ settings, loaded, saveFailed, update, applyLocal }),
+    [settings, loaded, saveFailed, update, applyLocal],
   );
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

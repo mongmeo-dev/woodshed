@@ -1,4 +1,4 @@
-import { delayUntilHeard, heardAtToPerformanceTime } from "./audio";
+import { delayUntilHeard, heardAtToPerformanceTime, outputSelectErrorCode } from "./audio";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./settings";
 
 test("normalizeSettings keeps valid values and drops the rest", () => {
@@ -20,4 +20,11 @@ test("heard time converts from Unix epoch to the performance timeline", () => {
   expect(heardAtToPerformanceTime(timeOrigin + 2_500, timeOrigin)).toBe(2_500);
   expect(delayUntilHeard(timeOrigin + 2_500, 2_480, timeOrigin)).toBe(20);
   expect(delayUntilHeard(timeOrigin + 2_500, 2_600, timeOrigin)).toBe(0);
+});
+
+test("output select errors are read by code", () => {
+  expect(outputSelectErrorCode({ code: "saveFailed", message: "disk full" })).toBe("saveFailed");
+  expect(outputSelectErrorCode({ code: "openFailed", message: "busy" })).toBe("openFailed");
+  expect(outputSelectErrorCode({ code: "other" })).toBe("unavailable");
+  expect(outputSelectErrorCode("boom")).toBe("unavailable");
 });
