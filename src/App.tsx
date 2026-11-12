@@ -3,6 +3,7 @@ import { SettingsProvider } from "./settings/SettingsProvider";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { Sidebar } from "./shell/Sidebar";
 import { ToolScreen } from "./shell/ToolScreen";
+import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import type { ViewId } from "./tools/tools";
 import { TunerScreen } from "./tools/tuner/TunerScreen";
 
@@ -17,6 +18,8 @@ export function App() {
             <SettingsScreen />
           ) : view === "tuner" ? (
             <TunerScreen />
+          ) : view === "drumMachine" ? (
+            <DrumMachineScreen />
           ) : (
             <ToolScreen tool={view} />
           )}

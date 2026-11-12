@@ -71,6 +71,21 @@
   --ws-sidebar-width: 224px;
   --ws-titlebar-height: 52px;
 
+  /* Drum machine sizes */
+  --ws-drum-border-width: 1px;
+  --ws-drum-control-height: 32px; /* fields and buttons, as .select and .button-primary */
+  --ws-drum-compact-size: 28px; /* step cells and the mute button */
+  --ws-drum-icon-size: 18px;
+  --ws-drum-play-width: 88px;
+  --ws-drum-number-width: 64px;
+  --ws-drum-name-width: 200px;
+  --ws-drum-slider-width: 104px;
+  --ws-drum-value-width: 3em;
+  --ws-drum-track-label-width: 112px;
+  --ws-drum-volume-width: 64px;
+  --ws-drum-grid-min-width: 560px;
+  --ws-drum-ruler-height: 16px;
+
   color-scheme: light;
 
   /* Light palette */
