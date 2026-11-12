@@ -1,5 +1,6 @@
 pub mod app_audio;
 pub mod audio;
+pub mod metronome;
 pub mod settings;
 
 use tauri::{Manager, State};
