@@ -625,6 +625,20 @@ fn stopping_trainer() -> MetronomeSettings {
 /// A label, an edit, and the main-beat frames expected after it.
 type Change = (&'static str, fn(&mut MetronomeSettings), &'static [u64]);
 
+/// Runs the stopping trainer to frame 80 000 (after the last beat at 74 880,
+/// before the planned stop at 98 880), applies `change`, renders 6 s more.
+fn edit_before_the_planned_stop(change: fn(&mut MetronomeSettings)) -> Rig {
+    let start = stopping_trainer();
+    let mut rig = Rig::recording(&start, 48_000, 2_880);
+    rig.run(80_000.0 / 48_000.0);
+    assert_eq!(*main_frames(&rig).last().unwrap(), 74_880);
+    let mut changed = start.clone();
+    change(&mut changed);
+    rig.update(&changed);
+    rig.run(6.0);
+    rig
+}
+
 #[test]
 fn a_change_after_the_last_beat_but_before_the_planned_stop_keeps_playing() {
     let changes: [Change; 3] = [
@@ -646,14 +660,7 @@ fn a_change_after_the_last_beat_but_before_the_planned_stop_keeps_playing() {
         ),
     ];
     for (label, change, next) in changes {
-        let start = stopping_trainer();
-        let mut rig = Rig::recording(&start, 48_000, 2_880);
-        rig.run(80_000.0 / 48_000.0);
-        assert_eq!(*main_frames(&rig).last().unwrap(), 74_880, "{label}");
-        let mut changed = start.clone();
-        change(&mut changed);
-        rig.update(&changed);
-        rig.run(3.0);
+        let rig = edit_before_the_planned_stop(change);
         assert_eq!(&main_frames(&rig)[4..7], next, "{label}");
         assert!(!rig.scheduler.is_done(rig.now()), "{label}");
         rig.assert_on_time();
@@ -661,16 +668,83 @@ fn a_change_after_the_last_beat_but_before_the_planned_stop_keeps_playing() {
 }
 
 #[test]
+fn more_bars_per_step_after_the_last_beat_play_one_more_bar_then_stop() {
+    let longer = |s: &mut MetronomeSettings| s.trainer.every_bars = 2;
+    let rig = edit_before_the_planned_stop(longer);
+    let frames = main_frames(&rig);
+    assert_eq!(
+        &frames[4..],
+        &[98_880, 122_880, 146_880, 170_880],
+        "the next bar plays, then the stop at the end of the second bar"
+    );
+    assert!(rig.scheduler.is_done(194_880));
+    assert!(!rig.scheduler.is_done(194_879));
+    rig.assert_on_time();
+
+    // The same input plans the same output.
+    assert_eq!(edit_before_the_planned_stop(longer).hits(), rig.hits());
+}
+
+#[test]
 fn a_change_that_still_stops_keeps_the_planned_stop() {
-    let start = stopping_trainer();
-    let mut rig = Rig::recording(&start, 48_000, 2_880);
-    rig.run(80_000.0 / 48_000.0);
-    rig.update(&settings(|s| {
-        *s = stopping_trainer();
-        s.sound = Sound::Beep;
-    }));
-    rig.run(3.0);
+    let rig = edit_before_the_planned_stop(|s| s.sound = Sound::Beep);
     assert_eq!(main_frames(&rig).len(), 4, "no beat after the stop");
     assert!(rig.scheduler.is_done(98_880));
     assert!(!rig.scheduler.is_done(98_879));
+}
+
+#[test]
+fn a_change_after_the_stop_has_played_does_not_restart() {
+    let start = stopping_trainer();
+    let mut rig = Rig::recording(&start, 48_000, 2_880);
+    rig.run(100_000.0 / 48_000.0);
+    assert!(rig.scheduler.is_done(rig.now()));
+    let mut changed = start.clone();
+    changed.trainer.at_max = TrainerEnd::Hold;
+    rig.update(&changed);
+    rig.run(3.0);
+    assert_eq!(main_frames(&rig).len(), 4);
+    assert!(rig.scheduler.is_done(rig.now()));
+    rig.assert_on_time();
+}
+
+#[test]
+fn trainer_interval_and_step_changed_mid_bar_count_from_the_bar_boundary() {
+    // 120 BPM, +10 every 4 bars. In the middle of bar 1 (one bar done at
+    // this tempo) switch to +20 every 2 bars: bar 1 completes the second
+    // bar, so bar 2 already plays at 140.
+    let start = settings(|s| {
+        s.trainer = Trainer {
+            enabled: true,
+            every_bars: 4,
+            step_bpm: 10.0,
+            max_bpm: 200.0,
+            at_max: TrainerEnd::Hold,
+        };
+    });
+    let mut rig = Rig::recording(&start, 48_000, 0);
+    rig.run(132_000.0 / 48_000.0);
+    let mut changed = start.clone();
+    changed.trainer.every_bars = 2;
+    changed.trainer.step_bpm = 20.0;
+    rig.update(&changed);
+    rig.run(10.0);
+
+    let downbeats: Vec<(u64, u64, u32)> = rig
+        .announced
+        .iter()
+        .filter_map(|a| match a {
+            Announcement::Beat(mark) if mark.beat == 0 => {
+                Some((mark.bar, mark.frame, mark.bpm_tenths))
+            }
+            _ => None,
+        })
+        .collect();
+    let bar = |n: u64| downbeats.iter().rev().find(|d| d.0 == n).copied().unwrap();
+    assert_eq!(bar(1), (1, 96_000, 1_200));
+    assert_eq!(bar(2), (2, 192_000, 1_400), "+20 after two bars");
+    assert_eq!(bar(3).2, 1_400);
+    // 140 BPM: 20 571.43 frames per beat, two bars from 192 000.
+    assert_eq!(bar(4), (4, 192_000 + frames_for(8.0, 48_000, 140.0), 1_600));
+    rig.assert_on_time();
 }

@@ -150,7 +150,8 @@ impl Scheduler {
     ) -> Result<(), EngineError> {
         let cut = now + secs_to_frames(CHANGE_LEAD_SECS, self.sample_rate());
         if self.timeline.is_finished() && self.timeline.next_frame() < cut {
-            // Playback ends too soon to schedule anything more.
+            // The planned stop is final once its frame can no longer be
+            // scheduled; until then the edit below decides it again.
             return Ok(());
         }
         if let Some(index) = self
