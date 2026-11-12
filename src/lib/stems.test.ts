@@ -86,7 +86,11 @@ test("a song is separated only when all its stems are ready", () => {
   expect(stemsReady(song("ready", "running"))).toBe(false);
   expect(separationFromStems({ id: "s1", stems: [] })).toBeNull();
   expect(separationFromStems(song("ready"))).toBeNull();
-  expect(separationFromStems(song("failed"))).toBeNull();
+  expect(separationFromStems(song("failed"))).toEqual({
+    songId: "s1",
+    state: "failed",
+    progress: null,
+  });
   for (const status of ["pending", "running"] as const) {
     expect(separationFromStems(song(status))).toEqual({
       songId: "s1",

@@ -173,7 +173,7 @@ let reports = engine.take_notifications();
 
 - 분리 명령(stem-engine, `src-tauri/src/separation/`): `stems_separate({ songId })`는 곡을 큐에 넣고, `stems_cancel_separation({ songId })`는 대기 중이면 바로 빼고 실행 중이면 다음 청크(7.8초)에서 멈춥니다. 둘 다 결과는 이벤트로 옵니다. `stems_separations()`는 끝나지 않은 분리(실행 중 먼저, 그다음 대기)를 마지막 이벤트 모양으로 돌려줍니다. 분리는 한 번에 한 곡씩 합니다.
 - 진행 이벤트 `stems://separation`(Rust `stems::SEPARATION_EVENT`, `SeparationEvent`): `{ songId, state: "running" | "done" | "failed" | "cancelled", progress: 0.0~1.0 | null }`. `running`의 `progress`는 대기·모델 준비 중이면 `null`, 청크를 시작하면 0.0, 이후 끝난 청크 비율입니다. `done`은 `progress` 1.0, 나머지는 `null`입니다.
-- 화면(`SeparationSlot`): 분리 전이거나 실패한 곡에 분리 버튼을 보이고, `running`이면 진행률(`null`이면 준비 중)과 취소 버튼, `failed`면 짧은 오류를 보입니다. `done`·`failed`·`cancelled`를 받으면 곡 목록을 다시 읽고, `done`이면 열린 곡을 같은 위치에서 다시 엽니다(스템 트랙 믹서). 화면을 다시 열면 `stems_separations()`와 manifest의 `pending`·`running`으로 진행 중 표시를 되살립니다.
+- 화면(`SeparationSlot`): 분리 전이거나 실패한 곡에 분리 버튼을 보이고, `running`이면 진행률(`null`이면 준비 중)과 취소 버튼, `failed`면 짧은 오류를 보입니다. `done`·`failed`·`cancelled`를 받으면 곡 목록을 다시 읽고, `done`이면 열린 곡을 같은 위치에서 다시 엽니다(스템 트랙 믹서). 화면은 이벤트 구독을 화면이 열려 있는 동안 한 번만 하고, 구독이 연결된 뒤에 `stems_separations()`와 곡 목록을 다시 읽어 맞춥니다(그 뒤 온 이벤트가 우선, 확인되지 않은 `running`은 버림). 이벤트가 없으면 manifest를 따릅니다: `pending`·`running`이면 준비 중, `failed`면 오류, 모두 `ready`면 남은 `running` 표시보다 우선하고 원본 트랙으로 열려 있으면 스템으로 다시 엽니다.
 - 플레이어는 곡을 열 때 트랙 파일을 열어 둡니다. 열린 곡의 `audio.wav`는 바꾸지 말고, 스템은 새 이름으로 쓴 뒤 이름을 바꿉니다.
 
 ### 플레이어 (`StemPlayer`)

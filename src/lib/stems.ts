@@ -294,13 +294,17 @@ export function stemsReady(song: { stems: StemEntry[] }): boolean {
   return song.stems.length > 0 && song.stems.every((stem) => stem.status === "ready");
 }
 
-/** The separation a song's manifest shows in progress, before any event arrives. */
+/** What a song's manifest says about its separation when no event says more. */
 export function separationFromStems(song: {
   id: string;
   stems: StemEntry[];
 }): SeparationEvent | null {
   const busy = song.stems.some((stem) => stem.status === "pending" || stem.status === "running");
-  return busy ? { songId: song.id, state: "running", progress: null } : null;
+  if (busy) return { songId: song.id, state: "running", progress: null };
+  if (song.stems.some((stem) => stem.status === "failed")) {
+    return { songId: song.id, state: "failed", progress: null };
+  }
+  return null;
 }
 
 export async function onSeparation(
