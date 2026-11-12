@@ -160,7 +160,7 @@ let reports = engine.take_notifications();
 - `source`는 `{ "kind": "file", "fileName" }` 또는 `{ "kind": "youtube", "url", "videoId" }`입니다.
 - `stems`가 없거나 비어 있으면 분리 전입니다. `status`는 `pending` | `running` | `ready` | `failed`입니다.
 - stem-engine은 분리를 시작할 때 6개 항목을 `running`(또는 `pending`)으로 쓰고, 각 파일을 임시 이름으로 쓴 뒤 `stems/<name>.wav`로 이름을 바꾸고 `ready`로 바꿉니다. 실패하면 `failed`입니다.
-- 읽기·저장은 Rust `stems::Library`(`get`, `list`, `save`: 임시 파일 + 이름 바꾸기)와 `Manifest`, `StemName`, `StemStatus`, `StemEntry`를 씁니다.
+- 읽기는 Rust `stems::Library`의 `get`·`list`로 합니다. **가져온 뒤 manifest를 바꾸는 일은 `Library::update(id, |manifest| …)`로만 합니다.** 이 함수는 프로세스 전역 잠금 안에서 파일을 다시 읽고, 클로저로 고친 뒤, 고유한 임시 파일과 이름 바꾸기로 저장합니다. 그래서 분리 진행과 화면이 동시에 고쳐도 서로의 변경을 잃지 않습니다. manifest 파일을 직접 쓰지 않습니다. 타입은 `Manifest`, `StemName`, `StemStatus`, `StemEntry`입니다.
 - 트랙 결정: 모든 항목이 `ready`일 때만 `Manifest::tracks()`가 스템 트랙을 `vocals → drums → bass → guitar → piano → other` 순서(manifest에 있는 것만)로 돌려주고, 그 전에는 `original`(`audio.wav`) 하나입니다. 믹서는 이 목록대로 트랙 수가 바뀝니다.
 
 ### 화면 연결
@@ -173,7 +173,9 @@ let reports = engine.take_notifications();
 
 - `StemPlayer::new(tracks, start)` → `StemSource`(엔진 `Source`) + `Feeder`(일반 스레드, `FeederThread`) + `PlayerShared`. 트랙은 최대 `MAX_TRACKS`(8)개, 모두 같은 샘플레이트입니다.
 - 제어는 엔진 예약 이벤트로만 보냅니다: `Start`, `Stop`, `Seek { frame }`(곡 프레임), `Param`(`stems::param`: `SPEED` 0.5~1.0, 트랙별 `VOLUME`/`MUTE`/`SOLO`), A-B 반복은 `loop_events(range)`. 마스터 볼륨은 소스 게인(`set_gain`)입니다.
-- 출력 레이트가 바뀌면 `Source::prepare`에서 같은 위치로 다시 시작합니다. 화면은 `audio://output-changed`에 `stems_resync`(대기 이벤트 취소) 후 재생 상태를 다시 맞춥니다.
+- A-B 반복은 `MIN_LOOP_FRAMES`(256프레임) 이상이어야 합니다. 더 짧으면 플레이어가 무시합니다(반복 없음). 화면은 0.1초 미만 선택을 반복으로 만들지 않습니다.
+- 재생 명령(`stems_play`·`pause`·`seek`·`set_speed`·`set_loop`·`set_track`)은 이벤트가 적용될 엔진 프레임 `{ frame }`을 돌려주고, `stems_transport`는 `renderedFrame`을 함께 돌려줍니다. 화면은 `renderedFrame < frame`인 transport를 무시해, 아직 적용되지 않은 명령을 오래된 상태로 덮지 않습니다. 화면의 명령은 하나의 큐로 차례대로 보냅니다.
+- 출력 레이트가 바뀌면 `Source::prepare`에서 같은 위치로 다시 시작합니다. 화면은 `audio://output-changed`를 받으면 `stems_restore(intent)`를 보냅니다. 이 명령은 한 번의 엔진 잠금 안에서 대기 이벤트를 취소하고, 화면의 의도 전체(아직 적용되지 않은 탐색, 속도, 반복, 트랙 믹스, 마스터, 재생 또는 정지)를 다시 예약합니다.
 
 ### Sidecar (yt-dlp, ffmpeg)
 
