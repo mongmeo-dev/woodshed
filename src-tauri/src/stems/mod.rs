@@ -4,6 +4,7 @@
 //! - [`StemPlayer`]: an engine [`crate::audio::Source`] that plays every track
 //!   of a song in sample lockstep, plus the feeder that streams them from disk.
 
+mod commands;
 mod decode;
 mod feeder;
 mod import;
@@ -17,6 +18,7 @@ mod youtube;
 #[cfg(test)]
 mod tests;
 
+pub use commands::*;
 pub use decode::{DecodeError, DecodedAudio, WAVEFORM_BINS, decode_to_wav, wav_waveform};
 pub use feeder::{BLOCK_FRAMES, BYPASS_SPEED, Feeder, MAX_TRACKS, MIN_SPEED, POOL_BLOCKS};
 pub use import::{
