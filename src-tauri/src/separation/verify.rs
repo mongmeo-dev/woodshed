@@ -335,41 +335,42 @@ mod tests {
         );
     }
 
+    /// One run's output: every value of both outputs set to this.
     #[derive(Clone, Copy)]
-    enum Run {
-        Right,
+    enum Out {
+        Value(f32),
         Nan,
-        /// Finite but wrong, differently every time.
-        Wrong,
+        Inf,
     }
 
-    /// Follows a script of outcomes, one per run across chunks.
+    /// Follows a script of outputs, one per run across chunks.
     struct Scripted {
-        script: Vec<Run>,
+        script: Vec<Out>,
         runs: Rc<Cell<usize>>,
     }
 
     impl StemModel for Scripted {
         fn predict(
             &mut self,
-            mix: &[f32],
+            _mix: &[f32],
             _spec: &[f32],
             spec_out: &mut [f32],
             wave_out: &mut [f32],
         ) -> Result<(), SeparationError> {
             let run = self.runs.get();
             self.runs.set(run + 1);
-            answer(mix, spec_out, wave_out);
-            match self.script.get(run).copied().unwrap_or(Run::Right) {
-                Run::Right => {}
-                Run::Nan => spec_out[2] = f32::NAN,
-                Run::Wrong => spec_out[run % spec_out.len()] += 0.01 * (run + 1) as f32,
-            }
+            let value = match self.script[run] {
+                Out::Value(value) => value,
+                Out::Nan => f32::NAN,
+                Out::Inf => f32::INFINITY,
+            };
+            spec_out.fill(value);
+            wave_out.fill(value);
             Ok(())
         }
     }
 
-    fn scripted(script: &[Run]) -> (VerifiedModel, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+    fn scripted(script: &[Out]) -> (VerifiedModel, Rc<Cell<usize>>, Rc<Cell<usize>>) {
         let runs = Rc::new(Cell::new(0));
         let cpu_runs = Rc::new(Cell::new(0));
         let loads = cpu_runs.clone();
@@ -383,33 +384,46 @@ mod tests {
         (model, runs, cpu_runs)
     }
 
+    /// Review R3 (1): a first finite run of zeros must not agree with the
+    /// zero-filled buffer from before any finite run of the chunk.
     #[test]
-    fn a_result_never_agrees_with_an_earlier_chunk() {
-        // Chunk 1 is accepted. Chunk 2 (same input, so the same right answer
-        // as chunk 1's output) gets NaN, one right run, then wrong runs: one
-        // right run of its own is not enough.
-        use Run::*;
-        let (mut model, runs, cpu) = scripted(&[Right, Right, Nan, Right, Wrong, Wrong]);
-        assert_eq!(predict(&mut model), right());
-        assert_eq!((runs.get(), cpu.get()), (2, 0));
-        let (_, wave_out) = predict(&mut model);
-        assert_eq!(wave_out[0], 42.0, "the fallback answered chunk 2");
-        assert_eq!((runs.get(), cpu.get()), (2 + MAX_ATTEMPTS, 1));
+    fn a_first_finite_run_after_a_nan_is_not_enough() {
+        use Out::*;
+        let (mut model, runs, cpu) = scripted(&[Nan, Value(0.0), Value(0.5), Value(0.5)]);
+        let (spec_out, wave_out) = predict(&mut model);
+        assert!(
+            spec_out.iter().chain(&wave_out).all(|&v| v == 0.5),
+            "{spec_out:?}"
+        );
+        assert_eq!((runs.get(), cpu.get()), (4, 0));
     }
 
+    /// Review R3 (2): the previous chunk's output P is not a vote in the new
+    /// chunk, even when the new chunk returns P again.
     #[test]
-    fn two_right_runs_after_a_nan_agree() {
-        use Run::*;
-        let (mut model, runs, cpu) = scripted(&[Nan, Right, Right]);
-        assert_eq!(predict(&mut model), right());
-        assert_eq!((runs.get(), cpu.get()), (3, 0));
+    fn the_previous_chunk_does_not_vote() {
+        use Out::*;
+        let p = Value(0.25);
+        let q = Value(0.75);
+        let (mut model, runs, cpu) = scripted(&[p, p, Nan, p, q, q]);
+        let (spec_out, _) = predict(&mut model);
+        assert!(spec_out.iter().all(|&v| v == 0.25));
+        assert_eq!(runs.get(), 2);
+        let (spec_out, wave_out) = predict(&mut model);
+        assert!(
+            spec_out.iter().chain(&wave_out).all(|&v| v == 0.75),
+            "{spec_out:?}"
+        );
+        assert_eq!((runs.get(), cpu.get()), (6, 0));
     }
 
+    /// Review R3 (3): one finite run among non-finite ones falls back.
     #[test]
-    fn finite_runs_that_always_differ_fall_back_after_four() {
-        let (mut model, runs, cpu) = scripted(&[Run::Wrong; MAX_ATTEMPTS]);
+    fn one_finite_run_among_non_finite_ones_falls_back() {
+        use Out::*;
+        let (mut model, runs, cpu) = scripted(&[Nan, Value(0.0), Nan, Inf]);
         let (_, wave_out) = predict(&mut model);
-        assert_eq!(wave_out[0], 42.0);
+        assert_eq!(wave_out[0], 42.0, "the fallback answered");
         assert_eq!((runs.get(), cpu.get()), (MAX_ATTEMPTS, 1));
     }
 
