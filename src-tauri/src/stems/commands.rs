@@ -203,14 +203,32 @@ pub async fn stems_pick_file(app: AppHandle) -> Result<Option<String>, String> {
     Ok(picked.map(|path| path.to_string_lossy().into_owned()))
 }
 
-fn begin_import(stems: &StemService) -> Result<Arc<ProcessControl>, ImportError> {
+/// The one import that may run at a time. Dropping it (the command
+/// finished, or its future was dropped) cancels anything still running and
+/// frees the slot.
+struct ImportSlot<'a> {
+    slot: &'a Mutex<Option<Arc<ProcessControl>>>,
+    control: Arc<ProcessControl>,
+}
+
+impl Drop for ImportSlot<'_> {
+    fn drop(&mut self) {
+        self.control.cancel();
+        lock(self.slot).take();
+    }
+}
+
+fn begin_import(stems: &StemService) -> Result<ImportSlot<'_>, ImportError> {
     let mut slot = lock(&stems.import);
     if slot.is_some() {
         return Err(ImportError::Busy);
     }
     let control = Arc::new(ProcessControl::default());
     *slot = Some(Arc::clone(&control));
-    Ok(control)
+    Ok(ImportSlot {
+        slot: &stems.import,
+        control,
+    })
 }
 
 #[tauri::command]
@@ -219,9 +237,9 @@ pub async fn stems_import_file(
     path: String,
     on_progress: Channel<ImportProgress>,
 ) -> Result<SongSummary, ImportError> {
-    let control = begin_import(&stems)?;
+    let slot = begin_import(&stems)?;
     let library = stems.library.clone();
-    let job = Arc::clone(&control);
+    let job = Arc::clone(&slot.control);
     let result = run_blocking(move || {
         import_file(
             &library,
@@ -234,7 +252,7 @@ pub async fn stems_import_file(
     })
     .await
     .unwrap_or(Err(ImportError::Cancelled));
-    lock(&stems.import).take();
+    drop(slot);
     result.map(|manifest| SongSummary::from(&manifest))
 }
 
@@ -244,10 +262,10 @@ pub async fn stems_import_link(
     url: String,
     on_progress: Channel<ImportProgress>,
 ) -> Result<SongSummary, ImportError> {
-    let control = begin_import(&stems)?;
+    let slot = begin_import(&stems)?;
     let library = stems.library.clone();
     let cache = stems.cache_dir.join("yt-dlp");
-    let job = Arc::clone(&control);
+    let job = Arc::clone(&slot.control);
     let result = run_blocking(move || {
         import_link(
             &library,
@@ -262,7 +280,7 @@ pub async fn stems_import_link(
     })
     .await
     .unwrap_or(Err(ImportError::Cancelled));
-    lock(&stems.import).take();
+    drop(slot);
     result.map(|manifest| SongSummary::from(&manifest))
 }
 
