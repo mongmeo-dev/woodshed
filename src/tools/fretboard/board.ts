@@ -20,6 +20,8 @@ export interface BoardMarker {
 export interface BoardString {
   /** Index from the lowest string (0). */
   index: number;
+  /** String number as players count it: 1 is the highest string. */
+  number: number;
   /** Natural name of the open string, for the string label. */
   name: string;
   /** One entry per fret, 0 (open) to `frets`; null where the note is outside the scale. */
@@ -42,7 +44,8 @@ export function buildBoard(
 ): Board {
   const scale = spellScale(key, scaleId);
   const byPitchClass = new Map(scale.notes.map((note) => [note.pitchClass, note]));
-  const strings = openStrings(instrument).map((_, index): BoardString => {
+  const open = openStrings(instrument);
+  const strings = open.map((_, index): BoardString => {
     const markers = Array.from({ length: frets + 1 }, (_fret, fret): BoardMarker | null => {
       const note = byPitchClass.get(pitchClassAt(instrument, index, fret));
       if (!note) return null;
@@ -53,7 +56,7 @@ export function buildBoard(
         root: note.pitchClass === scale.root,
       };
     });
-    return { index, name: openStringName(instrument, index), markers };
+    return { index, number: open.length - index, name: openStringName(instrument, index), markers };
   });
   return { scale, strings: strings.reverse() };
 }

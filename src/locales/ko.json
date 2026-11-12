@@ -12,7 +12,12 @@
   },
   "fretboard": {
     "board": "지판",
+    "scroll": "지판 스크롤",
     "root": "루트",
+    "marker": {
+      "position": "{{string}}번 줄 {{fret}}프렛",
+      "degree": "도수 {{interval}}"
+    },
     "instrument": {
       "label": "악기",
       "guitar6": "기타 6현",
