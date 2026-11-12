@@ -93,6 +93,14 @@ impl SharedState {
         self.generation.fetch_add(1, Ordering::AcqRel) + 1
     }
 
+    /// Returns to an earlier generation after a switch that did not take
+    /// effect (the new stream never played). Timing of that generation, if
+    /// any was published, becomes visible again.
+    pub(crate) fn restore_generation(&self, generation: u64, sample_rate: u32) {
+        self.sample_rate.store(sample_rate, Ordering::Relaxed);
+        self.generation.store(generation, Ordering::Release);
+    }
+
     /// Frames rendered so far. Events scheduled at or after this frame (plus
     /// one callback of margin) will be rendered exactly on time.
     pub fn frames_rendered(&self) -> FramePos {

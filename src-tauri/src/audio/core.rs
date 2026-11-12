@@ -174,6 +174,24 @@ impl EngineCore {
         self.generation = self.shared.begin_generation(format.sample_rate);
     }
 
+    /// Undoes a [`Self::reformat`] whose stream never started: back to
+    /// `format` and `generation`, sources re-prepared. Off the audio thread,
+    /// while no stream renders this core.
+    pub fn restore(&mut self, format: StreamFormat, generation: u64) {
+        assert!((1..=MAX_CHANNELS).contains(&usize::from(format.channels)));
+        self.drain_commands();
+        self.retry_parked();
+        self.format = format;
+        self.channels = usize::from(format.channels);
+        self.gain_coeff = gain_coeff(format.sample_rate);
+        for slot in &mut self.sources {
+            slot.source.prepare(format);
+        }
+        self.generation = generation;
+        self.shared
+            .restore_generation(generation, format.sample_rate);
+    }
+
     /// Output generation this core renders for.
     pub fn generation(&self) -> u64 {
         self.generation

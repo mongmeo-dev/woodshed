@@ -39,7 +39,7 @@ pub use device::{
     AudioError, DeviceInfo, Direction, OutputStreamInfo, StreamErrorKind, list_devices,
     output_device_sample_rate,
 };
-pub use engine::{AudioEngine, MeasuredLatency, OutputRequest};
+pub use engine::{AudioEngine, MeasuredLatency, OutputRequest, OutputStarter, PendingOutput};
 pub use handle::{EngineError, EngineHandle};
 pub use input::{
     InputCapture, InputChannel, InputRequest, InputShared, InputStreamInfo, open_input,

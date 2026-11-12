@@ -300,8 +300,31 @@ pub struct OutputStreamInfo {
     pub buffer_frames: Option<u32>,
 }
 
+/// Start/stop control of a built output stream. Implemented for cpal streams;
+/// tests substitute their own to inject failures.
+pub(crate) trait StreamControl: Send {
+    fn play(&self) -> Result<(), AudioError>;
+    fn pause(&self) -> Result<(), AudioError>;
+    /// Current time on the stream clock, in nanoseconds.
+    fn now_ns(&self) -> u64;
+}
+
+impl StreamControl for cpal::Stream {
+    fn play(&self) -> Result<(), AudioError> {
+        StreamTrait::play(self).map_err(AudioError::Backend)
+    }
+
+    fn pause(&self) -> Result<(), AudioError> {
+        StreamTrait::pause(self).map_err(AudioError::Backend)
+    }
+
+    fn now_ns(&self) -> u64 {
+        nanos(StreamTrait::now(self).as_nanos())
+    }
+}
+
 pub(crate) struct OutputStream {
-    pub(crate) stream: cpal::Stream,
+    pub(crate) stream: Box<dyn StreamControl>,
     pub(crate) info: OutputStreamInfo,
     pub(crate) error: Arc<AtomicU32>,
 }
@@ -348,7 +371,7 @@ pub(crate) fn build_output_stream(
                 };
                 return Ok((
                     OutputStream {
-                        stream,
+                        stream: Box::new(stream),
                         info,
                         error,
                     },

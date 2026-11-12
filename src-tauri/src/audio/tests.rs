@@ -679,3 +679,216 @@ fn buffer_candidates_start_at_the_device_minimum() {
         vec![Some(64), Some(128), Some(256), Some(512), None]
     );
 }
+
+// ---- output switching (failure injection at the stream layer) ------------------------
+
+mod switching {
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::{Arc, Mutex};
+
+    use super::super::device::{OutputStream, StreamControl};
+    use super::super::engine::OutputBuilder;
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    struct Spec {
+        rate: u32,
+        fail_build: bool,
+        fail_play: bool,
+    }
+
+    const fn ok(rate: u32) -> Spec {
+        Spec {
+            rate,
+            fail_build: false,
+            fail_play: false,
+        }
+    }
+
+    type Log = Arc<Mutex<Vec<String>>>;
+
+    struct FakeStream {
+        name: String,
+        fail_play: bool,
+        log: Log,
+    }
+
+    impl StreamControl for FakeStream {
+        fn play(&self) -> Result<(), AudioError> {
+            self.log.lock().unwrap().push(format!("play {}", self.name));
+            if self.fail_play {
+                return Err(AudioError::Unsupported("start failed".into()));
+            }
+            Ok(())
+        }
+
+        fn pause(&self) -> Result<(), AudioError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("pause {}", self.name));
+            Ok(())
+        }
+
+        fn now_ns(&self) -> u64 {
+            0
+        }
+    }
+
+    fn engine_with(specs: &[(&'static str, Spec)], log: &Log) -> AudioEngine {
+        let specs: HashMap<String, Spec> = specs
+            .iter()
+            .map(|(id, spec)| ((*id).to_owned(), *spec))
+            .collect();
+        let log = Arc::clone(log);
+        let builder: OutputBuilder = Arc::new(move |request: &OutputRequest, _cell| {
+            let id = request.device_id.clone().unwrap_or_default();
+            let spec = specs[&id];
+            if spec.fail_build {
+                log.lock().unwrap().push(format!("build {id} failed"));
+                return Err(AudioError::Unsupported("build failed".into()));
+            }
+            log.lock().unwrap().push(format!("build {id}"));
+            let info = OutputStreamInfo {
+                device_id: id.clone(),
+                device_name: id.clone(),
+                sample_rate: spec.rate,
+                channels: 2,
+                requested_buffer_frames: Some(64),
+                buffer_frames: Some(64),
+            };
+            let stream = FakeStream {
+                name: id,
+                fail_play: spec.fail_play,
+                log: Arc::clone(&log),
+            };
+            Ok((
+                OutputStream {
+                    stream: Box::new(stream),
+                    info,
+                    error: Arc::new(AtomicU32::new(0)),
+                },
+                StreamFormat::new(spec.rate, 2),
+            ))
+        });
+        AudioEngine::with_builder(EngineConfig::default(), builder).0
+    }
+
+    fn open(engine: &mut AudioEngine, id: &str) -> Result<OutputStreamInfo, AudioError> {
+        engine.open_output(&OutputRequest {
+            device_id: Some(id.to_owned()),
+            target_buffer_frames: 64,
+        })
+    }
+
+    #[test]
+    fn play_failure_keeps_the_previous_output_format_and_generation() {
+        let log = Log::default();
+        let mut engine = engine_with(
+            &[
+                ("A", ok(48_000)),
+                (
+                    "B",
+                    Spec {
+                        rate: 44_100,
+                        fail_build: false,
+                        fail_play: true,
+                    },
+                ),
+            ],
+            &log,
+        );
+        open(&mut engine, "A").unwrap();
+        let rate = Arc::new(AtomicU32::new(0));
+        engine
+            .handle()
+            .add_source(Box::new(FormatProbe(Arc::clone(&rate))), 1.0)
+            .unwrap();
+        let generation = engine.generation();
+        log.lock().unwrap().clear();
+
+        assert!(open(&mut engine, "B").is_err());
+
+        assert_eq!(engine.output_info().unwrap().device_id, "A");
+        assert_eq!(engine.generation(), generation, "no new generation");
+        assert_eq!(engine.format().sample_rate, 48_000);
+        assert_eq!(
+            rate.load(Ordering::SeqCst),
+            48_000,
+            "sources back on A's rate"
+        );
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["build B", "pause A", "play B", "play A"]
+        );
+    }
+
+    #[test]
+    fn build_failure_leaves_the_running_output_untouched() {
+        let log = Log::default();
+        let mut engine = engine_with(
+            &[
+                ("A", ok(48_000)),
+                (
+                    "C",
+                    Spec {
+                        rate: 44_100,
+                        fail_build: true,
+                        fail_play: false,
+                    },
+                ),
+            ],
+            &log,
+        );
+        open(&mut engine, "A").unwrap();
+        let generation = engine.generation();
+        log.lock().unwrap().clear();
+
+        assert!(open(&mut engine, "C").is_err());
+
+        assert_eq!(engine.output_info().unwrap().device_id, "A");
+        assert_eq!(engine.generation(), generation);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["build C failed"],
+            "A never paused"
+        );
+    }
+
+    #[test]
+    fn successful_switch_starts_a_generation_and_releases_the_old_stream() {
+        let log = Log::default();
+        let mut engine = engine_with(&[("A", ok(48_000)), ("D", ok(44_100))], &log);
+        open(&mut engine, "A").unwrap();
+        let generation = engine.generation();
+        log.lock().unwrap().clear();
+
+        let info = open(&mut engine, "D").unwrap();
+
+        assert_eq!(info.device_id, "D");
+        assert_eq!(engine.generation(), generation + 1);
+        assert_eq!(engine.format().sample_rate, 44_100);
+        assert_eq!(*log.lock().unwrap(), vec!["build D", "pause A", "play D"]);
+    }
+
+    #[test]
+    fn building_does_not_need_the_engine() {
+        // The starter builds while the engine stays free (e.g. unlocked).
+        let log = Log::default();
+        let mut engine = engine_with(&[("A", ok(48_000))], &log);
+        let starter = engine.output_starter();
+        let pending = starter
+            .build(&OutputRequest {
+                device_id: Some("A".into()),
+                target_buffer_frames: 64,
+            })
+            .unwrap();
+        assert!(
+            engine.output_info().is_none(),
+            "nothing changes until commit"
+        );
+        engine.commit_output(pending).unwrap();
+        assert_eq!(engine.output_info().unwrap().device_id, "A");
+    }
+}
