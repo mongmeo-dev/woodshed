@@ -35,6 +35,11 @@ export interface AudioStatus {
   output: OutputStreamInfo | null;
   outputLatencyMs: number | null;
   stats: EngineStats;
+  /**
+   * Output device chosen and in effect (`null` = system default). May differ
+   * from the device playing (fallback) and from the settings file.
+   */
+  preferredDeviceId: string | null;
 }
 
 export type EventKind =
@@ -83,6 +88,7 @@ export interface OutputChanged {
 const EMPTY_STATUS: AudioStatus = {
   output: null,
   outputLatencyMs: null,
+  preferredDeviceId: null,
   stats: {
     generation: 0,
     framesRendered: 0,
@@ -120,13 +126,25 @@ export function outputSelectErrorCode(error: unknown): OutputSelectError["code"]
   return "unavailable";
 }
 
+/** Output and preference right after the output manager handled a choice. */
+export interface OutputSelection {
+  output: OutputChanged | null;
+  preferredDeviceId: string | null;
+}
+
 /**
  * Asks the output manager to switch the output (`null` follows the system
- * default) and save the choice. Rejects with an {@link OutputSelectError};
- * on `openFailed` and `saveFailed` the choice is still in effect.
+ * default) and save the choice. Rejects with an {@link OutputSelectError}:
+ * on `openFailed` and `saveFailed` the choice is still in effect; on
+ * `unavailable` it may still take effect later, so read the final state from
+ * {@link getAudioStatus} (`preferredDeviceId`) and {@link onOutputChanged}.
  */
-export function setOutputDevice(deviceId: string | null): Promise<AudioStatus> {
-  return call("audio_set_output_device", { deviceId }, EMPTY_STATUS);
+export function setOutputDevice(deviceId: string | null): Promise<OutputSelection> {
+  return call<OutputSelection>(
+    "audio_set_output_device",
+    { deviceId },
+    { output: null, preferredDeviceId: deviceId },
+  );
 }
 
 export function playTestSound(): Promise<ScheduledSound | null> {

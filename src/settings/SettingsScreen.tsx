@@ -62,7 +62,7 @@ function useAudioStatus() {
     };
   }, [refresh]);
 
-  return { status, setStatus, devices };
+  return { status, devices, refresh };
 }
 
 /**
@@ -110,24 +110,34 @@ function formatNumber(value: number, language: string, digits = 0) {
 
 export function SettingsScreen() {
   const { t, i18n } = useTranslation();
-  const { settings, update, applyLocal, saveFailed } = useSettings();
-  const { status, setStatus, devices } = useAudioStatus();
+  const { settings, update, saveFailed } = useSettings();
+  const { status, devices, refresh } = useAudioStatus();
+  // The user's pick, shown only while its request is in flight.
+  const [pendingChoice, setPendingChoice] = useState<string | null>(null);
   const { beat, play } = useHeardBeat();
   const [outputError, setOutputError] = useState<OutputSelectError["code"] | null>(null);
   const language = i18n.language;
   const output = status?.output ?? null;
 
+  // The running preference from the app is the truth; it also catches up
+  // with a choice whose request timed out but completed later.
+  const runningChoice = status
+    ? (status.preferredDeviceId ?? SYSTEM_DEFAULT)
+    : (settings.outputDeviceId ?? SYSTEM_DEFAULT);
+  const selectedDevice = pendingChoice ?? runningChoice;
+
   const changeDevice = async (value: string) => {
     const deviceId = value === SYSTEM_DEFAULT ? null : value;
+    setPendingChoice(value);
     let code: OutputSelectError["code"] | null = null;
     try {
-      setStatus(await setOutputDevice(deviceId));
+      await setOutputDevice(deviceId);
     } catch (error) {
       code = outputSelectErrorCode(error);
     }
     setOutputError(code);
-    // The app saved the choice (or keeps it in effect when saving failed).
-    if (code !== "unavailable") applyLocal({ outputDeviceId: deviceId });
+    await refresh();
+    setPendingChoice(null);
   };
 
   const languageOptions = [
@@ -162,7 +172,7 @@ export function SettingsScreen() {
                 <select
                   id="output-device"
                   className="select"
-                  value={settings.outputDeviceId ?? SYSTEM_DEFAULT}
+                  value={selectedDevice}
                   onChange={(event) => void changeDevice(event.target.value)}
                 >
                   <option value={SYSTEM_DEFAULT}>{t("settings.output.systemDefault")}</option>

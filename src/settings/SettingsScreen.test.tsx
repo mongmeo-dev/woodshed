@@ -4,6 +4,8 @@ import { i18n } from "../i18n";
 import { SettingsProvider } from "./SettingsProvider";
 import { SettingsScreen } from "./SettingsScreen";
 
+/** The app's running preference, as audio_status reports it. */
+let runningPreferred: string | null = null;
 const setOutputDevice = vi.fn();
 
 vi.mock("../lib/audio", async (importOriginal) => {
@@ -31,12 +33,14 @@ vi.mock("../lib/audio", async (importOriginal) => {
         lateEvents: 0,
         droppedEvents: 0,
       },
+      preferredDeviceId: runningPreferred,
     }),
     setOutputDevice: (deviceId: string | null) => setOutputDevice(deviceId),
   };
 });
 
 beforeEach(async () => {
+  runningPreferred = null;
   setOutputDevice.mockReset();
   await i18n.changeLanguage("en");
 });
@@ -47,44 +51,52 @@ async function chooseInterface() {
       <SettingsScreen />
     </SettingsProvider>,
   );
-  const select = await screen.findByLabelText("Output Device");
+  const select = (await screen.findByLabelText("Output Device")) as HTMLSelectElement;
   await screen.findByRole("option", { name: "Interface" });
   fireEvent.change(select, { target: { value: "coreaudio:C" } });
-  return select as HTMLSelectElement;
+  return select;
+}
+
+/** The backend applies the choice, then answers with `answer`. */
+function backendApplies(answer: () => Promise<unknown>) {
+  setOutputDevice.mockImplementation((deviceId: string | null) => {
+    runningPreferred = deviceId;
+    return answer();
+  });
 }
 
 test("a save failure shows the save error and keeps the new choice", async () => {
-  setOutputDevice.mockRejectedValue({ code: "saveFailed", message: "disk full" });
+  backendApplies(() => Promise.reject({ code: "saveFailed", message: "disk full" }));
   const select = await chooseInterface();
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Couldn't save settings");
-  expect(select.value).toBe("coreaudio:C");
+  await waitFor(() => expect(select.value).toBe("coreaudio:C"));
   expect(setOutputDevice).toHaveBeenCalledWith("coreaudio:C");
 });
 
 test("an open failure shows the device error and keeps the choice", async () => {
-  setOutputDevice.mockRejectedValue({ code: "openFailed", message: "busy" });
+  backendApplies(() => Promise.reject({ code: "openFailed", message: "busy" }));
   const select = await chooseInterface();
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
     "Can't open the output device",
   );
-  expect(select.value).toBe("coreaudio:C");
+  await waitFor(() => expect(select.value).toBe("coreaudio:C"));
 });
 
 test("a successful switch shows no error", async () => {
-  setOutputDevice.mockResolvedValue({
-    output: null,
-    outputLatencyMs: null,
-    stats: {
-      generation: 2,
-      framesRendered: 0,
-      callbacks: 0,
-      maxCallbackFrames: 0,
-      lateEvents: 0,
-      droppedEvents: 0,
-    },
-  });
+  backendApplies(() => Promise.resolve({ output: null, preferredDeviceId: "coreaudio:C" }));
   const select = await chooseInterface();
   await waitFor(() => expect(select.value).toBe("coreaudio:C"));
-  expect(screen.queryByText("Couldn't save settings")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("after a timeout the screen follows the state the app ends up in", async () => {
+  // No answer in time; the request had not been applied yet.
+  setOutputDevice.mockRejectedValue({ code: "unavailable" });
+  const select = await chooseInterface();
+  await waitFor(() => expect(select.value).toBe(""), { timeout: 1500 });
+
+  // The manager finishes the switch later; the next status poll shows it.
+  runningPreferred = "coreaudio:C";
+  await waitFor(() => expect(select.value).toBe("coreaudio:C"), { timeout: 2500 });
 });
