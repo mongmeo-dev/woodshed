@@ -1,0 +1,132 @@
+/*
+ * Design tokens from DESIGN.md (Apple design analysis, VoltAgent/awesome-design-md).
+ * Light uses the light canvases; dark uses the dark product-tile surfaces.
+ * Components read only the semantic --ws-* variables below.
+ */
+
+:root {
+  /* Typography — SF Pro via the system font stack; Korean falls back to Apple SD Gothic Neo. */
+  --ws-font-text:
+    "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", sans-serif;
+  --ws-font-display:
+    "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
+    sans-serif;
+
+  /* display-md: 34 / 600 / 1.47 / -0.374px (line-height tightened for single-line titles) */
+  --ws-type-title-size: 34px;
+  --ws-type-title-weight: 600;
+  --ws-type-title-tracking: -0.374px;
+  /* display-lg leading (1.1) for single-line screen titles */
+  --ws-type-title-leading: 1.1;
+  /* tagline: 21 / 600 / 1.19 / 0.231px */
+  --ws-type-section-size: 21px;
+  --ws-type-section-weight: 600;
+  --ws-type-section-leading: 1.19;
+  --ws-type-section-tracking: 0.231px;
+  /* body: 17 / 400 / 1.47 / -0.374px */
+  --ws-type-body-size: 17px;
+  --ws-type-body-leading: 1.47;
+  --ws-type-body-tracking: -0.374px;
+  /* caption: 14 / 400 / 1.43 / -0.224px; caption-strong: 600 */
+  --ws-type-caption-size: 14px;
+  --ws-type-caption-leading: 1.43;
+  --ws-type-caption-tracking: -0.224px;
+  /* fine-print: 12 / 400 / 1.0 / -0.12px */
+  --ws-type-fine-size: 12px;
+  --ws-type-fine-tracking: -0.12px;
+
+  /* Spacing */
+  --ws-space-xxs: 4px;
+  --ws-space-xs: 8px;
+  --ws-space-sm: 12px;
+  --ws-space-md: 17px;
+  --ws-space-lg: 24px;
+  --ws-space-xl: 32px;
+  --ws-space-xxl: 48px;
+  --ws-space-section: 80px;
+
+  /* Radius */
+  --ws-radius-xs: 5px;
+  --ws-radius-sm: 8px;
+  --ws-radius-md: 11px;
+  --ws-radius-lg: 18px;
+  --ws-radius-pill: 9999px;
+
+  /* Motion (Kinetics "Tab Pill Glide" curve, shortened) */
+  --ws-ease-glide: cubic-bezier(0.65, 0, 0.35, 1);
+  --ws-duration-glide: 240ms;
+  --ws-duration-fast: 150ms;
+  --ws-duration-pulse: 600ms;
+
+  /* Focus ring and the inset of compact controls */
+  --ws-focus-width: 2px;
+  --ws-control-inset: 2px;
+
+  /* Layout */
+  --ws-sidebar-width: 224px;
+  --ws-titlebar-height: 52px;
+
+  color-scheme: light;
+
+  /* Light palette */
+  --ws-color-accent: #0066cc; /* primary */
+  --ws-color-accent-focus: #0071e3; /* primary-focus */
+  --ws-color-on-accent: #ffffff; /* on-primary */
+  --ws-color-canvas: #ffffff; /* canvas */
+  --ws-color-sidebar: #f5f5f7; /* canvas-parchment */
+  --ws-color-surface: #fafafc; /* surface-pearl */
+  --ws-color-selected: #ffffff; /* canvas on parchment */
+  --ws-color-control: #f0f0f0; /* divider-soft */
+  --ws-color-text: #1d1d1f; /* ink */
+  --ws-color-text-secondary: #333333; /* ink-muted-80 */
+  --ws-color-text-tertiary: #7a7a7a; /* ink-muted-48 */
+  --ws-color-hairline: #e0e0e0; /* hairline */
+  --ws-color-divider: #f0f0f0; /* divider-soft */
+  --ws-color-chip: #d2d2d7; /* surface-chip-translucent */
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ws-color-accent: #2997ff; /* primary-on-dark */
+  --ws-color-accent-focus: #2997ff;
+  --ws-color-on-accent: #ffffff;
+  --ws-color-canvas: #1d1d1f; /* ink used as a dark tile */
+  --ws-color-sidebar: #000000; /* surface-black */
+  --ws-color-surface: #272729; /* surface-tile-1 */
+  --ws-color-selected: #2a2a2c; /* surface-tile-2 */
+  --ws-color-control: #252527; /* surface-tile-3 */
+  --ws-color-text: #ffffff; /* body-on-dark */
+  --ws-color-text-secondary: #cccccc; /* body-muted */
+  --ws-color-text-tertiary: #7a7a7a; /* ink-muted-48 */
+  --ws-color-hairline: #333333; /* ink-muted-80 */
+  --ws-color-divider: #2a2a2c; /* surface-tile-2 */
+  --ws-color-chip: #333333;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ws-color-accent: #2997ff;
+    --ws-color-accent-focus: #2997ff;
+    --ws-color-on-accent: #ffffff;
+    --ws-color-canvas: #1d1d1f;
+    --ws-color-sidebar: #000000;
+    --ws-color-surface: #272729;
+    --ws-color-selected: #2a2a2c;
+    --ws-color-control: #252527;
+    --ws-color-text: #ffffff;
+    --ws-color-text-secondary: #cccccc;
+    --ws-color-text-tertiary: #7a7a7a;
+    --ws-color-hairline: #333333;
+    --ws-color-divider: #2a2a2c;
+    --ws-color-chip: #333333;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ws-duration-glide: 0ms;
+    --ws-duration-fast: 0ms;
+    --ws-duration-pulse: 0ms;
+  }
+}

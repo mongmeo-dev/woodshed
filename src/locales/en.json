@@ -1,0 +1,42 @@
+{
+  "nav": {
+    "label": "Tools",
+    "settings": "Settings"
+  },
+  "tools": {
+    "tuner": "Tuner",
+    "metronome": "Metronome",
+    "drumMachine": "Drum Machine",
+    "stemSplitter": "Stem Splitter",
+    "fretboard": "Scale Fretboard"
+  },
+  "settings": {
+    "title": "Settings",
+    "output": {
+      "section": "Audio Output",
+      "device": "Output Device",
+      "systemDefault": "System Default",
+      "sampleRate": "Sample Rate",
+      "buffer": "Buffer Size",
+      "latency": "Output Latency",
+      "test": "Play Test Sound",
+      "notAvailable": "Can't open the output device"
+    },
+    "language": {
+      "section": "Language",
+      "system": "System"
+    },
+    "theme": {
+      "section": "Appearance",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "saveFailed": "Couldn't save settings"
+  },
+  "units": {
+    "hz": "{{value}} Hz",
+    "frames": "{{value}} frames",
+    "ms": "{{value}} ms"
+  }
+}
