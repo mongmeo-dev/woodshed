@@ -50,6 +50,13 @@ const SMOOTHING: f64 = 0.25;
 const NOTE_HYSTERESIS: f64 = 0.1;
 /// The last reading is kept this long when estimates stop (decay, noise).
 const HOLD_SECS: f64 = 0.2;
+/// A new note without a louder attack (same level, legato): while tracking,
+/// a stretch that no longer repeats at the tracked period (residual
+/// `Σ(x[t] − x[t−P])² / Σ(x[t]² + x[t−P]²)` above this) starts a new sound.
+/// Unrelated signals give about 1, the same note well under 0.2.
+const BREAK_RESIDUAL: f64 = 0.5;
+/// Shortest stretch the break check looks at.
+const BREAK_BLOCK_SECS: f64 = 0.001;
 
 const SILENCE_DB: f32 = -100.0;
 
@@ -90,6 +97,9 @@ struct Stable {
     frequency: f64,
     midi: i32,
     clarity: f64,
+    /// Sound (segment) it was last confirmed in. Within the same sound an
+    /// estimate an octave away is the same note (a weak fundamental fading).
+    segment: u64,
 }
 
 /// Biquad low-pass (RBJ cookbook), direct form I.
@@ -148,9 +158,17 @@ pub struct Analyzer {
     onset_long: usize,
     onset_refractory: u64,
     hold: u64,
+    break_block: usize,
 
     gate_open: bool,
+    segment: u64,
     segment_start: u64,
+    /// Short tracking windows (around the shown pitch) or a search window
+    /// from `search_start`, long enough for any pitch down to B0.
+    tracking: bool,
+    search_start: u64,
+    /// Where the break check resumes.
+    break_checked: u64,
     last_onset: Option<u64>,
     previous: Option<f64>,
     stable: Option<Stable>,
@@ -200,8 +218,13 @@ impl Analyzer {
             onset_long,
             onset_refractory: frames(rate, ONSET_REFRACTORY_SECS) as u64,
             hold: frames(rate, HOLD_SECS) as u64,
+            break_block: frames(rate, BREAK_BLOCK_SECS).max(16),
             gate_open: false,
+            segment: 0,
             segment_start: 0,
+            tracking: false,
+            search_start: 0,
+            break_checked: 0,
             last_onset: None,
             previous: None,
             stable: None,
@@ -211,6 +234,30 @@ impl Analyzer {
 
     pub fn sample_rate(&self) -> f64 {
         self.rate
+    }
+
+    /// Forgets everything heard (a gap in the input): the next samples are
+    /// treated as a fresh start, with no reading shown until a new one.
+    pub fn reset(&mut self) {
+        let rate = self.rate;
+        self.lowpass = [
+            Biquad::lowpass(rate, LOWPASS_HZ, 0.541_196_1),
+            Biquad::lowpass(rate, LOWPASS_HZ, 1.306_563),
+        ];
+        self.history.fill(0.0);
+        self.total = 0;
+        self.since_analysis = 0;
+        self.hop = self.base_hop;
+        self.gate_open = false;
+        self.segment += 1;
+        self.segment_start = 0;
+        self.tracking = false;
+        self.search_start = 0;
+        self.break_checked = 0;
+        self.last_onset = None;
+        self.previous = None;
+        self.stable = None;
+        self.last_estimate = 0;
     }
 
     /// Changes A4; the next frame uses it.
@@ -257,6 +304,9 @@ impl Analyzer {
     fn analyze(&mut self) -> Frame {
         let level = power_db(self.power(self.level_len, 0));
         self.update_gate(level);
+        if self.gate_open {
+            self.check_break();
+        }
         let estimate = if self.gate_open {
             self.estimate()
         } else {
@@ -305,26 +355,71 @@ impl Analyzer {
     /// Starts a new sound `back` samples ago: later windows only cover it, so
     /// the previous note does not blur the new one.
     fn start_segment(&mut self, back: u64) {
+        self.segment += 1;
         self.segment_start = self.total.saturating_sub(back);
+        self.search_start = self.segment_start;
+        self.tracking = false;
         self.last_onset = Some(self.total);
         self.previous = None;
         self.hop = self.base_hop;
     }
 
+    /// While tracking a clear pitch, looks for the point where the signal
+    /// stops repeating at that pitch's period (a new note at the same level)
+    /// and starts a new sound there, so the search window holds only it.
+    fn check_break(&mut self) {
+        let Some(stable) = self.stable else { return };
+        if !self.tracking || stable.clarity < ACQUIRE_CLARITY {
+            self.break_checked = self.total;
+            return;
+        }
+        let period = (self.rate / stable.frequency).round() as u64;
+        let block = (period as usize).max(self.break_block) as u64;
+        let capacity = self.history.len() as u64;
+        // Blocks overlap by half and start one block back, so a change near
+        // the end of the previous step is still seen whole.
+        let mut start = self
+            .break_checked
+            .saturating_sub(block)
+            .max(self.segment_start + period)
+            .max(self.total.saturating_sub(capacity - period));
+        self.break_checked = self.total;
+        let step = (block / 2).max(1);
+        while start + block <= self.total {
+            let (mut difference, mut energy) = (0.0, 0.0);
+            for i in start..start + block {
+                let x = f64::from(self.history[(i % capacity) as usize]);
+                let y = f64::from(self.history[((i - period) % capacity) as usize]);
+                difference += (x - y) * (x - y);
+                energy += x * x + y * y;
+            }
+            if energy > 1e-12 && difference > BREAK_RESIDUAL * energy {
+                self.start_segment(self.total - start);
+                return;
+            }
+            start += step;
+        }
+    }
+
     /// One MPM estimate (frequency, clarity) on the window that fits now.
     fn estimate(&mut self) -> Option<(f64, f64)> {
-        let available = (self.total - self.segment_start) as usize;
-        let target = match self.stable {
-            Some(stable) => ((TRACK_PERIODS * self.rate / stable.frequency).ceil() as usize)
-                .max(self.min_track_window),
-            None => usize::MAX,
-        };
-        let len = available.min(target).min(self.window.len());
+        let tracking = self.tracking && self.stable.is_some();
+        let len = match self.stable {
+            Some(stable) if tracking => {
+                let target = ((TRACK_PERIODS * self.rate / stable.frequency).ceil() as usize)
+                    .max(self.min_track_window);
+                target.min((self.total - self.segment_start) as usize)
+            }
+            // Searching: everything since the sound (or the last agreeing
+            // estimate) began, so a low note after a high one is found.
+            _ => (self.total - self.search_start.max(self.segment_start)) as usize,
+        }
+        .min(self.window.len());
         if len < self.min_window {
             return None;
         }
         // While tracking, analyse less often for long (low) windows.
-        self.hop = if self.stable.is_some() {
+        self.hop = if tracking {
             self.base_hop.max(len / 24)
         } else {
             self.base_hop
@@ -348,7 +443,7 @@ impl Analyzer {
         let estimate = self
             .mpm
             .detect(&self.window[head..len], self.min_lag, self.max_lag)?;
-        let needed = if self.stable.is_some() {
+        let needed = if tracking {
             TRACK_CLARITY
         } else {
             ACQUIRE_CLARITY
@@ -359,38 +454,70 @@ impl Analyzer {
     fn stabilize(&mut self, estimate: Option<(f64, f64)>) {
         let Some((frequency, clarity)) = estimate else {
             self.previous = None;
-            if self.stable.is_some() && self.total - self.last_estimate > self.hold {
-                self.stable = None;
-            }
+            self.lose_track();
+            self.expire();
             return;
         };
         let previous = self.previous.replace(frequency);
-        match &mut self.stable {
-            Some(stable) if cents_between(stable.frequency, frequency).abs() <= AGREE_CENTS => {
-                // Same pitch: smooth in the log domain.
-                let smoothed =
-                    (stable.frequency.ln() * (1.0 - SMOOTHING) + frequency.ln() * SMOOTHING).exp();
-                stable.frequency = smoothed;
-                stable.clarity = clarity;
-                let exact = midi_of(smoothed, self.reference);
-                if (exact - f64::from(stable.midi)).abs() > 0.5 + NOTE_HYSTERESIS {
-                    stable.midi = exact.round() as i32;
-                }
-                self.last_estimate = self.total;
+        let segment = self.segment;
+        let same_note = self.stable.and_then(|stable| {
+            let agrees = |f: f64| cents_between(stable.frequency, f).abs() <= AGREE_CENTS;
+            if agrees(frequency) {
+                Some(frequency)
+            } else if stable.segment == segment {
+                // Same sound: an octave away is the same note.
+                [frequency / 2.0, frequency * 2.0]
+                    .into_iter()
+                    .find(|&f| agrees(f))
+            } else {
+                None
             }
-            _ => {
-                // A new pitch is shown once two estimates in a row agree.
-                if previous.is_some_and(|p| cents_between(p, frequency).abs() <= AGREE_CENTS) {
-                    self.stable = Some(Stable {
-                        frequency,
-                        midi: midi_of(frequency, self.reference).round() as i32,
-                        clarity,
-                    });
-                    self.last_estimate = self.total;
-                } else if self.stable.is_some() && self.total - self.last_estimate > self.hold {
-                    self.stable = None;
-                }
+        });
+        if let (Some(stable), Some(frequency)) = (&mut self.stable, same_note) {
+            // Same pitch: smooth in the log domain.
+            let smoothed =
+                (stable.frequency.ln() * (1.0 - SMOOTHING) + frequency.ln() * SMOOTHING).exp();
+            stable.frequency = smoothed;
+            stable.clarity = clarity;
+            stable.segment = segment;
+            let exact = midi_of(smoothed, self.reference);
+            if (exact - f64::from(stable.midi)).abs() > 0.5 + NOTE_HYSTERESIS {
+                stable.midi = exact.round() as i32;
             }
+            self.last_estimate = self.total;
+            self.tracking = true;
+            return;
+        }
+        // A new pitch is shown once two estimates in a row agree.
+        if previous.is_some_and(|p| cents_between(p, frequency).abs() <= AGREE_CENTS) {
+            self.stable = Some(Stable {
+                frequency,
+                midi: midi_of(frequency, self.reference).round() as i32,
+                clarity,
+                segment,
+            });
+            self.last_estimate = self.total;
+            self.tracking = true;
+        } else {
+            self.lose_track();
+            self.expire();
+        }
+    }
+
+    /// Estimates stopped matching the shown pitch: search again with windows
+    /// from the last estimate that matched (the display keeps the old pitch
+    /// for [`HOLD_SECS`]).
+    fn lose_track(&mut self) {
+        if self.tracking {
+            self.tracking = false;
+            self.search_start = self.last_estimate;
+            self.hop = self.base_hop;
+        }
+    }
+
+    fn expire(&mut self) {
+        if self.stable.is_some() && self.total - self.last_estimate > self.hold {
+            self.stable = None;
         }
     }
 

@@ -77,18 +77,33 @@ impl Mpm {
     }
 
     /// Estimates the period of `window` between `min_lag` and `max_lag`
-    /// samples (`max_lag` is capped at half the window, so the window holds at
-    /// least two periods). `None` when no key maximum is found.
+    /// samples. The search is capped at half the window, so the window holds
+    /// at least two periods. `None` when no key maximum is found, or when the
+    /// best candidate could still be the octave above a period too long for
+    /// this window (a longer window decides).
     pub fn detect(&mut self, window: &[f32], min_lag: usize, max_lag: usize) -> Option<Estimate> {
         let len = window.len().min(self.max_window);
         let window = &window[window.len() - len..];
-        let max_lag = max_lag.min(len / 2);
+        let search = max_lag.min(len / 2);
         let min_lag = min_lag.max(2);
-        if max_lag <= min_lag + 2 {
+        if search <= min_lag + 2 {
             return None;
         }
-        self.nsdf_into(window, max_lag + 2);
-        pick_peak(&self.nsdf[..max_lag + 2], min_lag)
+        self.nsdf_into(window, search + 2);
+        let nsdf = &self.nsdf[..search + 2];
+        let index = pick_peak(nsdf, min_lag)?;
+        let estimate = refine(nsdf, index);
+        if 2 * index > max_lag || 1.0 - estimate.clarity <= RESIDUAL_FLOOR {
+            return Some(estimate);
+        }
+        match odd_part_flips(window, index) {
+            // Half the true period: report the double, once the window is
+            // long enough to measure it (the half-period peak is biased).
+            Some(true) => lower_key(nsdf, 2 * index).map(|lag| refine(nsdf, lag)),
+            Some(false) => Some(estimate),
+            // Too short to tell: only a clean candidate is trusted.
+            None => (1.0 - estimate.clarity <= CLEAN_RESIDUAL).then_some(estimate),
+        }
     }
 
     /// Fills `self.nsdf[..lags]` with the NSDF of `window`.
@@ -141,8 +156,8 @@ impl Mpm {
 
 /// MPM peak picking on an NSDF: key maxima are the highest points of each
 /// positive lobe after the NSDF first goes negative; the first key maximum
-/// at or above `KEY_MAX_RATIO` × the highest wins.
-fn pick_peak(nsdf: &[f64], min_lag: usize) -> Option<Estimate> {
+/// at or above `KEY_MAX_RATIO` × the highest wins. Returns its lag.
+fn pick_peak(nsdf: &[f64], min_lag: usize) -> Option<usize> {
     let last = nsdf.len() - 1;
     // Skip the lobe around τ = 0.
     let mut tau = 1;
@@ -150,38 +165,112 @@ fn pick_peak(nsdf: &[f64], min_lag: usize) -> Option<Estimate> {
         tau += 1;
     }
     let mut best = f64::MIN;
-    // (index, value) of each lobe's maximum, at most a handful.
-    let mut keys = [(0_usize, 0.0_f64); 64];
-    let mut count = 0;
+    let mut first_key = None;
+    // Two passes would need storage; instead keep the keys' running best and
+    // re-scan once at the end.
     while tau < last {
-        // Find the next positive-going crossing.
         while tau < last && nsdf[tau] <= 0.0 {
             tau += 1;
         }
-        let mut peak = (0, f64::MIN);
-        while tau < last && nsdf[tau] > 0.0 {
-            if nsdf[tau] > peak.1 && nsdf[tau] >= nsdf[tau - 1] && nsdf[tau] >= nsdf[tau + 1] {
-                peak = (tau, nsdf[tau]);
-            }
-            tau += 1;
-        }
-        // A lobe cut off by the end of the search range is not a true maximum
-        // unless it already turned down.
-        if peak.0 >= min_lag && peak.0 > 0 && peak.0 < last && count < keys.len() {
-            keys[count] = peak;
-            count += 1;
-            best = best.max(peak.1);
+        let peak = lobe_peak(nsdf, &mut tau);
+        if let Some((index, value)) = peak.filter(|&(index, _)| index >= min_lag) {
+            best = best.max(value);
+            first_key.get_or_insert(index);
         }
     }
+    first_key?;
     let threshold = KEY_MAX_RATIO * best;
-    let &(index, _) = keys[..count]
-        .iter()
-        .find(|(_, value)| *value >= threshold)?;
+    let mut tau = 1;
+    while tau < last && nsdf[tau] > 0.0 {
+        tau += 1;
+    }
+    while tau < last {
+        while tau < last && nsdf[tau] <= 0.0 {
+            tau += 1;
+        }
+        if let Some((index, value)) = lobe_peak(nsdf, &mut tau)
+            && index >= min_lag
+            && value >= threshold
+        {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// Highest local maximum of the positive lobe starting at `tau`; advances
+/// `tau` past the lobe. A lobe cut off by the end of the range has none
+/// unless it already turned down.
+fn lobe_peak(nsdf: &[f64], tau: &mut usize) -> Option<(usize, f64)> {
+    let last = nsdf.len() - 1;
+    let mut peak: Option<(usize, f64)> = None;
+    while *tau < last && nsdf[*tau] > 0.0 {
+        let t = *tau;
+        if nsdf[t] >= nsdf[t - 1]
+            && nsdf[t] >= nsdf[t + 1]
+            && peak.is_none_or(|(_, value)| nsdf[t] > value)
+        {
+            peak = Some((t, nsdf[t]));
+        }
+        *tau += 1;
+    }
+    peak
+}
+
+/// The key maximum within 2 % of `lag`, if the NSDF reaches that far.
+fn lower_key(nsdf: &[f64], lag: usize) -> Option<usize> {
+    let tolerance = (lag / 50).max(2);
+    let from = lag.checked_sub(tolerance)?.max(1);
+    let to = (lag + tolerance).min(nsdf.len().checked_sub(2)?);
+    if from >= to {
+        return None;
+    }
+    (from..=to)
+        .filter(|&t| nsdf[t] > 0.0 && nsdf[t] >= nsdf[t - 1] && nsdf[t] >= nsdf[t + 1])
+        .max_by(|&a, &b| nsdf[a].total_cmp(&nsdf[b]))
+}
+
+/// The NSDF peak at `index`, refined by parabolic interpolation.
+fn refine(nsdf: &[f64], index: usize) -> Estimate {
     let (offset, height) = parabolic(nsdf[index - 1], nsdf[index], nsdf[index + 1]);
-    Some(Estimate {
+    Estimate {
         period: index as f64 + offset,
         clarity: height.min(1.0),
-    })
+    }
+}
+
+/// A candidate this periodic (residual `1 − NSDF` at most this) is taken
+/// even when its octave check cannot run yet.
+const CLEAN_RESIDUAL: f64 = 0.01;
+/// Below this residual the candidate repeats perfectly: no octave check.
+const RESIDUAL_FLOOR: f64 = 1e-4;
+/// Correlation of `d(t)` and `d(t − lag)` at or below minus this means the
+/// residual flips sign every `lag`. Noise alone gives −0.5 (both differences
+/// share the sample at `t − lag`), decay and drift give about +1.
+const FLIP_CORRELATION: f64 = 0.75;
+
+/// Octave check for a candidate period `lag`. With a weak fundamental (strong
+/// second harmonic) half the period repeats almost perfectly and MPM picks
+/// it. What does not repeat, `d(t) = x(t) − x(t − lag)`, is then the odd
+/// harmonics, which flip sign every `lag`: `d(t − lag) ≈ −d(t)`. When `lag`
+/// is the true period, `d` is decay, drift or noise, which does not flip.
+/// `Some(true)`: the true period is `2 × lag`. `None`: window too short.
+fn odd_part_flips(window: &[f32], lag: usize) -> Option<bool> {
+    let span = 2 * lag;
+    if window.len() < span + (lag / 4).max(64) {
+        return None;
+    }
+    let x = |t: usize| f64::from(window[t]);
+    let (mut cross, mut now, mut before) = (0.0, 0.0, 0.0);
+    for t in span..window.len() {
+        let d0 = x(t) - x(t - lag);
+        let d1 = x(t - lag) - x(t - span);
+        cross += d0 * d1;
+        now += d0 * d0;
+        before += d1 * d1;
+    }
+    let norm = (now * before).sqrt();
+    Some(norm > 0.0 && cross <= -FLIP_CORRELATION * norm)
 }
 
 /// Vertex of the parabola through (-1, a), (0, b), (1, c): (offset, height).
@@ -232,6 +321,87 @@ mod tests {
             let cents = 1200.0 * (rate / estimate.period / freq).log2();
             assert!(cents.abs() < 0.5, "{freq} Hz off by {cents} cents");
             assert!(estimate.clarity > 0.98);
+        }
+    }
+
+    /// Fundamental at a tenth of the second harmonic: half the period repeats
+    /// with NSDF ≈ 0.98, above the key-maximum threshold.
+    #[test]
+    fn a_weak_fundamental_is_not_read_an_octave_up() {
+        let rate = 48_000.0;
+        let mut mpm = Mpm::new(8192);
+        for (freq, phase) in [(110.0, 0.0), (55.0, 1.3), (82.41, 2.6), (220.0, 0.7)] {
+            let window: Vec<f32> = (0..4096)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * freq * i as f64 / rate;
+                    (0.03 * t.sin() + 0.3 * (2.0 * t + phase).sin()) as f32
+                })
+                .collect();
+            let estimate = mpm.detect(&window, 20, 1778).expect("pitch");
+            let cents = 1200.0 * (rate / estimate.period / freq).log2();
+            assert!(cents.abs() < 1.0, "{freq} Hz read {cents:+.1} cents off");
+        }
+    }
+
+    #[test]
+    fn a_window_too_short_for_the_fundamental_waits_instead_of_reading_high() {
+        let rate = 48_000.0;
+        let freq = 110.0;
+        let tone = |len: usize| -> Vec<f32> {
+            (0..len)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * freq * i as f64 / rate;
+                    (0.03 * t.sin() + 0.3 * (2.0 * t).sin()) as f32
+                })
+                .collect()
+        };
+        let mut mpm = Mpm::new(4096);
+        // 1.5 periods: only 220 Hz fits the lag range; its odd part flips.
+        assert_eq!(mpm.detect(&tone(654), 20, 1778), None);
+        // 2.2 periods: the fundamental is measured.
+        let estimate = mpm.detect(&tone(960), 20, 1778).expect("pitch");
+        let cents = 1200.0 * (rate / estimate.period / freq).log2();
+        assert!(cents.abs() < 1.0, "{cents:+.1} cents");
+    }
+
+    #[test]
+    fn noise_does_not_turn_a_clear_tone_into_its_lower_octave() {
+        let rate = 48_000.0;
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut noise = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let mut mpm = Mpm::new(8192);
+        for freq in [110.0, 220.0, 440.0] {
+            let window: Vec<f32> = (0..4096)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * freq * i as f64 / rate;
+                    (0.3 * t.sin() + 0.01 * noise()) as f32
+                })
+                .collect();
+            let estimate = mpm.detect(&window, 20, 1778).expect("pitch");
+            let cents = 1200.0 * (rate / estimate.period / freq).log2();
+            assert!(cents.abs() < 1.0, "{freq} Hz read {cents:+.1} cents off");
+        }
+    }
+
+    #[test]
+    fn a_decaying_pure_tone_is_not_read_an_octave_down() {
+        let rate = 48_000.0;
+        let mut mpm = Mpm::new(8192);
+        for freq in [61.7, 110.0, 440.0] {
+            let window: Vec<f32> = (0..6000)
+                .map(|i| {
+                    let t = i as f64 / rate;
+                    ((-8.0 * t).exp() * (std::f64::consts::TAU * freq * t).sin()) as f32
+                })
+                .collect();
+            let estimate = mpm.detect(&window, 20, 1778).expect("pitch");
+            let cents = 1200.0 * (rate / estimate.period / freq).log2();
+            assert!(cents.abs() < 1.0, "{freq} Hz read {cents:+.1} cents off");
         }
     }
 
