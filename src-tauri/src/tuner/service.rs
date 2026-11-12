@@ -281,9 +281,37 @@ fn publish(shared: &Shared, status: TunerStatus) {
     }
 }
 
+/// The status's `input_generation`: one counter that goes up by one
+/// whenever the readings stop belonging to the same input — the stream is
+/// (re)opened, the pump restarts after a gap, or the state changes. It
+/// continues from the last published value, so it never repeats, even across
+/// tuner stops and starts.
+#[derive(Debug)]
+struct InputGeneration {
+    value: u64,
+    /// (stream generation, pump restarts, state) last seen.
+    seen: Option<(u64, u64, TunerState)>,
+}
+
+impl InputGeneration {
+    fn starting_at(value: u64) -> Self {
+        Self { value, seen: None }
+    }
+
+    fn observe(&mut self, stream: u64, restarts: u64, state: TunerState) -> u64 {
+        let key = (stream, restarts, state);
+        if self.seen != Some(key) {
+            self.seen = Some(key);
+            self.value += 1;
+        }
+        self.value
+    }
+}
+
 fn status_of(
     supervisor: &InputSupervisor<CpalInputEnv>,
     pump: Option<&InputPump>,
+    generation: &mut InputGeneration,
     permission: MicPermission,
     reference_hz: u16,
 ) -> TunerStatus {
@@ -300,7 +328,11 @@ fn status_of(
         preferred_device_id: supervisor.preferred().map(str::to_owned),
         channel: supervisor.channel(),
         reference_hz,
-        input_generation: supervisor.generation() + pump.map_or(0, InputPump::restarts),
+        input_generation: generation.observe(
+            supervisor.generation(),
+            pump.map_or(0, InputPump::restarts),
+            state,
+        ),
     }
 }
 
@@ -317,6 +349,7 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
     let mut next_permission_check = Instant::now();
     let mut pump: Option<InputPump> = None;
     let mut generation = 0;
+    let mut input_generation = InputGeneration::starting_at(lock(&shared.status).input_generation);
     let mut frames = FrameSender {
         last_sent: None,
         last_note: None,
@@ -340,6 +373,7 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
                     status.state = TunerState::Stopped;
                     status.input = None;
                     status.fallback = false;
+                    status.input_generation += 1;
                     publish(shared, status);
                     return;
                 }
@@ -420,7 +454,13 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
 
         publish(
             shared,
-            status_of(&supervisor, pump.as_ref(), permission, reference_hz),
+            status_of(
+                &supervisor,
+                pump.as_ref(),
+                &mut input_generation,
+                permission,
+                reference_hz,
+            ),
         );
         std::thread::sleep(POLL);
     }
@@ -498,4 +538,39 @@ pub async fn tuner_set_reference(
 #[tauri::command]
 pub async fn tuner_open_microphone_settings() -> Result<(), String> {
     permission::open_settings().map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_generation_changes_whenever_the_input_does() {
+        let mut generation = InputGeneration::starting_at(0);
+        let listening = TunerState::Listening;
+        let first = generation.observe(1, 0, listening);
+        assert_eq!(
+            generation.observe(1, 0, listening),
+            first,
+            "nothing changed"
+        );
+        let restarted = generation.observe(1, 1, listening);
+        assert!(restarted > first, "pump restart");
+        // A sum would collide here: 1 + 1 == 2 + 0.
+        let reopened = generation.observe(2, 0, listening);
+        assert!(reopened > restarted, "stream reopened after a restart");
+        let lost = generation.observe(2, 0, TunerState::NoInput);
+        assert!(lost > reopened, "state change");
+        let back = generation.observe(2, 0, listening);
+        assert!(back > lost, "back to the same stream is still a change");
+    }
+
+    #[test]
+    fn input_generation_continues_across_tuner_restarts() {
+        let mut before = InputGeneration::starting_at(0);
+        let last = before.observe(3, 2, TunerState::Listening);
+        // A new analysis thread starts its stream count again from 1.
+        let mut after = InputGeneration::starting_at(last + 1);
+        assert!(after.observe(1, 0, TunerState::Listening) > last + 1);
+    }
 }
