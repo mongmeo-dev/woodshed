@@ -7,6 +7,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::tuner::TunerSettings;
+
 pub const SETTINGS_FILE: &str = "settings.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,11 +37,15 @@ pub struct Settings {
     /// `None` follows the system default output.
     pub output_device_id: Option<String>,
     pub theme: Theme,
+    pub tuner: TunerSettings,
 }
 
 pub struct SettingsStore {
     path: PathBuf,
+    /// Cached copy. Held only to read or swap it, never during file I/O.
     current: Mutex<Settings>,
+    /// Serializes writers (read, change, write the file, swap the cache).
+    writer: Mutex<()>,
 }
 
 impl SettingsStore {
@@ -60,6 +66,7 @@ impl SettingsStore {
         Self {
             path,
             current: Mutex::new(current),
+            writer: Mutex::new(()),
         }
     }
 
@@ -70,20 +77,44 @@ impl SettingsStore {
             .clone()
     }
 
-    /// Writes atomically (temp file + rename) and updates the cached copy.
-    pub fn save(&self, settings: Settings) -> io::Result<Settings> {
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let text = serde_json::to_string_pretty(&settings).map_err(io::Error::other)?;
-        let temp = self.path.with_extension("json.tmp");
-        fs::write(&temp, text)?;
-        fs::rename(&temp, &self.path)?;
+    /// Changes the settings in one step: writers take turns, and each takes
+    /// the current value, applies `change`, writes the file (temp file +
+    /// rename) and then swaps the cached copy. Every writer changes only its
+    /// own fields this way, so concurrent owners (the screen, the output
+    /// manager, the tuner) never undo each other. Readers ([`Self::get`])
+    /// wait for no file I/O: they see the old value until the swap. If
+    /// writing fails, nothing changes.
+    pub fn update(&self, change: impl FnOnce(&mut Settings)) -> io::Result<Settings> {
+        let _turn = self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut next = self.get();
+        change(&mut next);
+        self.write(&next)?;
         *self
             .current
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = settings.clone();
-        Ok(settings)
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next.clone();
+        Ok(next)
+    }
+
+    /// Replaces every field. Prefer [`SettingsStore::update`].
+    pub fn save(&self, settings: Settings) -> io::Result<Settings> {
+        self.update(|current| *current = settings)
+    }
+
+    fn write(&self, settings: &Settings) -> io::Result<()> {
+        if let Some(dir) = self.path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let text = serde_json::to_string_pretty(settings).map_err(io::Error::other)?;
+        // Per process: several app builds may share the data directory.
+        let temp = self
+            .path
+            .with_extension(format!("json.{}.tmp", std::process::id()));
+        fs::write(&temp, text)?;
+        fs::rename(&temp, &self.path)
     }
 }
 
@@ -111,6 +142,7 @@ mod tests {
             language: Some(Language::En),
             output_device_id: Some("coreaudio:BuiltInSpeakerDevice".into()),
             theme: Theme::Dark,
+            ..Settings::default()
         };
         SettingsStore::load(&dir).save(settings.clone()).unwrap();
         assert_eq!(SettingsStore::load(&dir).get(), settings);
@@ -126,6 +158,7 @@ mod tests {
         assert_eq!(settings.language, Some(Language::Ko));
         assert_eq!(settings.theme, Theme::System);
         assert_eq!(settings.output_device_id, None);
+        assert_eq!(settings.tuner, TunerSettings::default());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -135,6 +168,90 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();
         assert_eq!(SettingsStore::load(&dir).get(), Settings::default());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_owners_keep_each_others_changes() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = temp_dir("concurrent");
+        let store = Arc::new(SettingsStore::load(&dir));
+        store
+            .update(|s| {
+                s.language = Some(Language::En);
+                s.theme = Theme::Dark;
+            })
+            .unwrap();
+        const ROUNDS: u16 = 200;
+        let barrier = Arc::new(Barrier::new(2));
+        let tuner = {
+            let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+            std::thread::spawn(move || {
+                for round in 0..ROUNDS {
+                    barrier.wait();
+                    store
+                        .update(|s| s.tuner.reference_hz = 430 + round % 21)
+                        .unwrap();
+                }
+            })
+        };
+        let output = {
+            let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+            std::thread::spawn(move || {
+                for round in 0..ROUNDS {
+                    barrier.wait();
+                    store
+                        .update(|s| s.output_device_id = Some(format!("coreaudio:dev{round}")))
+                        .unwrap();
+                }
+            })
+        };
+        tuner.join().unwrap();
+        output.join().unwrap();
+
+        let last = ROUNDS - 1;
+        for settings in [store.get(), SettingsStore::load(&dir).get()] {
+            assert_eq!(settings.tuner.reference_hz, 430 + last % 21);
+            assert_eq!(
+                settings.output_device_id.as_deref(),
+                Some(format!("coreaudio:dev{last}").as_str())
+            );
+            assert_eq!(settings.language, Some(Language::En));
+            assert_eq!(settings.theme, Theme::Dark);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reading_does_not_wait_for_a_save_in_progress() {
+        use std::sync::{Arc, mpsc};
+        use std::time::{Duration, Instant};
+
+        let dir = temp_dir("read-during-save");
+        let store = Arc::new(SettingsStore::load(&dir));
+        let (started, wait_started) = mpsc::channel();
+        let (release, wait_release) = mpsc::channel::<()>();
+        let writer = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                store
+                    .update(|s| {
+                        // Stands in for a slow write: the writer is mid-save.
+                        started.send(()).unwrap();
+                        wait_release.recv().unwrap();
+                        s.theme = Theme::Dark;
+                    })
+                    .unwrap();
+            })
+        };
+        wait_started.recv().unwrap();
+        let begun = Instant::now();
+        assert_eq!(store.get().theme, Theme::System, "old value until saved");
+        assert!(begun.elapsed() < Duration::from_millis(50), "read waited");
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        assert_eq!(store.get().theme, Theme::Dark);
         let _ = fs::remove_dir_all(&dir);
     }
 }

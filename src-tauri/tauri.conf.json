@@ -42,7 +42,11 @@
       "icons/icon.png"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "./macos/en.lproj/InfoPlist.strings",
+        "Resources/ko.lproj/InfoPlist.strings": "./macos/ko.lproj/InfoPlist.strings"
+      }
     }
   }
 }
