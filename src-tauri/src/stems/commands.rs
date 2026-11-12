@@ -134,8 +134,8 @@ pub struct Transport {
     pub ended: bool,
     pub position_secs: f64,
     pub heard_at_ms: Option<f64>,
-    /// Engine frames rendered when sampled; events scheduled at or before
-    /// this frame are reflected.
+    /// Engine frames rendered when sampled. A command is reflected in this
+    /// sample once `rendered_frame >= ack_frame` (see [`ack_frame`]).
     pub rendered_frame: FramePos,
 }
 
@@ -171,7 +171,19 @@ fn schedule(
             .schedule(frame, source, *kind)
             .map_err(|error| error.to_string())?;
     }
-    Ok(Scheduled { frame })
+    Ok(Scheduled {
+        ack_frame: ack_frame(frame),
+    })
+}
+
+/// The one definition of "applied" for the screen. The engine renders blocks
+/// `[start, end)`, runs the events whose `frame < end`, and then publishes
+/// `frames_rendered = end`; the source publishes its state during that
+/// render. So an event scheduled at `frame` shows in a transport sample once
+/// `rendered_frame >= frame + 1`. (`rendered_frame == frame` means the block
+/// ended just before the event.)
+pub fn ack_frame(frame: FramePos) -> FramePos {
+    frame + 1
 }
 
 fn with_player<T>(
@@ -372,12 +384,12 @@ pub async fn stems_close(
     Ok(())
 }
 
-/// Where a command's events sit on the engine clock: a transport sample
-/// with `rendered_frame >= frame` already reflects them.
+/// When a command's events show: a transport sample with
+/// `rendered_frame >= ack_frame` reflects them (see [`ack_frame`]).
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Scheduled {
-    pub frame: FramePos,
+    pub ack_frame: FramePos,
 }
 
 /// Mix of one track as the screen holds it.
@@ -551,8 +563,9 @@ pub async fn stems_transport(
         return Ok(None);
     };
     let engine = lock(audio.engine());
-    // The source publishes the position after its last rendered frame,
-    // which is the engine's rendered frame count (within one callback).
+    // Read the rendered frame count before the player state: the source
+    // publishes during a callback and the count at its end, so state read
+    // afterwards is at least as new as `rendered_frame` (never older).
     let rendered_frame = engine.stats().frames_rendered;
     let heard_at_ms = engine.heard_at_epoch_ms(rendered_frame);
     Ok(Some(Transport {
@@ -733,5 +746,69 @@ mod tests {
         let moved = active.shared.position() - before;
         assert!((moved - 0.75 * 9_600.0).abs() < 300.0, "{moved}");
         assert!(heard.iter().any(|s| s.abs() > 0.0), "audible again");
+    }
+
+    /// Renders device-sized callbacks until exactly `frame` frames are rendered.
+    fn render_to(engine: &mut OfflineEngine, feeder: &mut crate::stems::Feeder, frame: u64) {
+        let mut buffer = vec![0.0; 64 * 2];
+        while engine.handle.frames_rendered() < frame {
+            let left = (frame - engine.handle.frames_rendered()).min(64) as usize;
+            feeder.fill();
+            engine.render_callback(&mut buffer[..left * 2]);
+        }
+    }
+
+    /// The same check the screen makes on a transport sample.
+    fn reflected(engine: &OfflineEngine, scheduled: Scheduled) -> bool {
+        engine.handle.frames_rendered() >= scheduled.ack_frame
+    }
+
+    #[test]
+    fn start_stop_and_seek_show_exactly_from_their_ack_frame() {
+        const AT: u64 = 960;
+        let ack = Scheduled {
+            ack_frame: ack_frame(AT),
+        };
+
+        // Start.
+        let (mut engine, active, mut feeder) = ramp_player();
+        engine
+            .handle
+            .schedule(AT, active.source, EventKind::Start)
+            .unwrap();
+        render_to(&mut engine, &mut feeder, AT);
+        assert!(!reflected(&engine, ack));
+        assert!(!active.shared.playing(), "not started at {AT}");
+        render_to(&mut engine, &mut feeder, 1_024);
+        assert!(reflected(&engine, ack));
+        assert!(active.shared.playing(), "started by 1024");
+
+        // Stop.
+        let (mut engine, active, mut feeder) = ramp_player();
+        engine
+            .handle
+            .schedule(0, active.source, EventKind::Start)
+            .unwrap();
+        engine
+            .handle
+            .schedule(AT, active.source, EventKind::Stop)
+            .unwrap();
+        render_to(&mut engine, &mut feeder, AT);
+        assert!(!reflected(&engine, ack));
+        assert!(active.shared.playing(), "still playing at {AT}");
+        render_to(&mut engine, &mut feeder, 1_024);
+        assert!(reflected(&engine, ack));
+        assert!(!active.shared.playing(), "stopped by 1024");
+
+        // Seek (paused).
+        let (mut engine, active, mut feeder) = ramp_player();
+        let seek = EventKind::Seek { frame: 50_000 };
+        engine.handle.schedule(AT, active.source, seek).unwrap();
+        render_to(&mut engine, &mut feeder, AT);
+        assert!(!reflected(&engine, ack));
+        assert_eq!(active.shared.position(), 0.0, "not moved at {AT}");
+        render_to(&mut engine, &mut feeder, 1_024);
+        assert!(reflected(&engine, ack));
+        assert_eq!(active.shared.position(), 50_000.0, "moved by 1024");
     }
 }

@@ -1,0 +1,310 @@
+/* Metronome screen. Tokens only (src/styles/tokens.css). */
+
+.metronome {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-xl);
+  max-width: 640px;
+}
+
+/* ---- stage: beats, tempo, transport ------------------------------------------- */
+
+.metronome-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ws-space-lg);
+  padding: var(--ws-space-xl) var(--ws-space-lg);
+  background: var(--ws-color-surface);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-lg);
+}
+
+.beat-row,
+.meter,
+.ratio {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.beat-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: var(--ws-space-xs);
+}
+
+.beat-cell {
+  display: flex;
+  align-items: flex-end;
+  width: var(--ws-space-lg);
+  height: var(--ws-space-xxl);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ws-radius-sm);
+  background: transparent;
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.beat-cell:active {
+  transform: scale(0.95);
+}
+
+/*
+ * Lit the instant a beat is heard (no transition in), then fades back quickly
+ * as the next beat lights, so two beats never look lit at once.
+ */
+.beat-bar {
+  display: block;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-chip);
+  transition:
+    background-color var(--ws-duration-fast) var(--ws-ease-glide),
+    border-color var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.beat-bar[data-accent="strong"] {
+  height: var(--ws-space-xxl);
+}
+
+.beat-bar[data-accent="normal"] {
+  height: var(--ws-space-xl);
+}
+
+.beat-bar[data-accent="weak"] {
+  height: var(--ws-space-md);
+}
+
+.beat-bar[data-accent="mute"] {
+  height: var(--ws-space-xs);
+  background: transparent;
+  border-color: var(--ws-color-hairline);
+}
+
+.beat-bar[data-lit="true"] {
+  background: var(--ws-color-accent);
+  border-color: var(--ws-color-accent);
+  transition: none;
+}
+
+.beat-bar[data-accent="mute"][data-lit="true"] {
+  background: transparent;
+}
+
+.pulse-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ws-space-sm);
+}
+
+.pulse-dot {
+  width: var(--ws-space-xs);
+  height: var(--ws-space-xs);
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-chip);
+  transition: background-color var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.pulse-dot[data-lit="true"] {
+  background: var(--ws-color-text);
+  transition: none;
+}
+
+.bpm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ws-space-xxs);
+}
+
+.bpm-value,
+.bpm-input {
+  font-family: var(--ws-font-display);
+  font-size: var(--ws-type-hero-size);
+  font-weight: var(--ws-type-hero-weight);
+  line-height: var(--ws-type-hero-leading);
+  letter-spacing: var(--ws-type-hero-tracking);
+  font-variant-numeric: tabular-nums;
+}
+
+.bpm-value {
+  padding: 0 var(--ws-space-xs);
+  border-radius: var(--ws-radius-sm);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.bpm-input {
+  width: 5ch;
+  padding: 0;
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: inherit;
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.bpm-unit,
+.number-unit,
+.meter-slash,
+.ratio-colon {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+}
+
+.metronome-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-sm);
+}
+
+.transport-play {
+  justify-content: center;
+  min-width: calc(var(--ws-space-xxl) * 2);
+}
+
+.icon-button,
+.button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-accent);
+  font-size: var(--ws-type-caption-size);
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.icon-button {
+  width: 32px;
+  padding: 0;
+}
+
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.button-secondary {
+  padding: 0 var(--ws-space-md);
+}
+
+.icon-button:active,
+.button-secondary:active,
+.switch:active {
+  transform: scale(0.95);
+}
+
+/* ---- settings rows ------------------------------------------------------------ */
+
+.meter,
+.ratio,
+.number-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ws-space-xs);
+}
+
+.meter-slash::before {
+  content: "/";
+}
+
+.ratio-colon::before {
+  content: ":";
+}
+
+.number-input,
+.text-input {
+  min-height: 32px;
+  padding: 0 var(--ws-space-sm);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: inherit;
+  font: inherit;
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.number-input {
+  width: 88px;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* On/off switch: the knob glides across (Kinetics "Switch Spring", without
+   the overshoot, on the shared glide curve). */
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-chip);
+  transition:
+    background-color var(--ws-duration-fast) var(--ws-ease-glide),
+    transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.switch[aria-checked="true"] {
+  background: var(--ws-color-accent);
+}
+
+.switch-knob {
+  position: absolute;
+  top: var(--ws-control-inset);
+  left: var(--ws-control-inset);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-on-accent);
+  transition: transform var(--ws-duration-glide) var(--ws-ease-glide);
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  transform: translateX(16px);
+}
+
+/* ---- presets ------------------------------------------------------------------ */
+
+.preset-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preset-list + .row {
+  border-top: 1px solid var(--ws-color-divider);
+}
+
+.preset-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex: none;
+  gap: var(--ws-space-xs);
+}

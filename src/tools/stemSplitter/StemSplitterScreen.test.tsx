@@ -19,7 +19,11 @@ const backend = vi.hoisted(() => {
     applyMs: 150,
     /** Bumped per test so timers left by an earlier test do nothing. */
     run: 0,
+    /** When true, events apply only on an explicit renderTo(). */
+    manual: false,
     frame: 0,
+    /** Frame of the last scheduled command. */
+    lastFrame: 0,
     pending: [] as Array<{ frame: number; apply: () => void }>,
     applied: {
       playing: false,
@@ -33,25 +37,39 @@ const backend = vi.hoisted(() => {
       state.run += 1;
       state.calls = [];
       state.tracks = ["original"];
+      state.manual = false;
       state.frame = 0;
+      state.lastFrame = 0;
       state.pending = [];
       state.applied = { playing: false, position: 0, speed: 1, loop: null, mix: [] };
     },
-    /** Queues `apply` for a later frame and returns that frame. */
+    /**
+     * Same rule as the engine (src-tauri/src/audio/core.rs `render_block`):
+     * rendering up to `end` runs the events with `frame < end`, then
+     * publishes `frames_rendered = end`.
+     */
+    runsBy(eventFrame: number, end: number) {
+      return eventFrame < end;
+    },
+    /** Queues `apply` at a later frame; answers like the backend (Rust `ack_frame`). */
     schedule(apply: () => void) {
       const frame = state.frame + 480;
+      state.lastFrame = frame;
       state.pending.push({ frame, apply });
       const run = state.run;
-      setTimeout(() => {
-        if (run === state.run) state.renderTo(frame);
-      }, state.applyMs);
-      return { frame };
+      if (!state.manual) {
+        setTimeout(() => {
+          if (run === state.run) state.renderTo(frame + 64);
+        }, state.applyMs);
+      }
+      // The first rendered end that runs the event.
+      return { ackFrame: frame + 1 };
     },
-    renderTo(frame: number) {
-      const due = state.pending.filter((event) => event.frame <= frame);
-      state.pending = state.pending.filter((event) => event.frame > frame);
+    renderTo(end: number) {
+      const due = state.pending.filter((event) => state.runsBy(event.frame, end));
+      state.pending = state.pending.filter((event) => !state.runsBy(event.frame, end));
       for (const event of due) event.apply();
-      state.frame = Math.max(state.frame, frame);
+      state.frame = Math.max(state.frame, end);
     },
   };
   return state;
@@ -419,4 +437,95 @@ test("an output change re-applies a pending seek, speed, loop and mute", async (
       master: 1,
     },
   });
+});
+
+/** Waits until the screen has read the transport at least once more. */
+async function nextPoll() {
+  const before = called("stems_transport").length;
+  await waitFor(() => expect(called("stems_transport").length).toBeGreaterThan(before), {
+    timeout: 1_500,
+  });
+}
+
+/** Waits for the command to be scheduled and returns its frame. */
+async function scheduled(command: string, count: number) {
+  await waitFor(() => expect(called(command)).toHaveLength(count));
+  await waitFor(() => expect(backend.pending.length).toBeGreaterThan(0));
+  return backend.lastFrame;
+}
+
+test("the mock engine applies an event at 960 only once 1024 is rendered, like the engine", () => {
+  let ran = false;
+  backend.frame = 480;
+  backend.manual = true;
+  expect(
+    backend.schedule(() => {
+      ran = true;
+    }),
+  ).toEqual({ ackFrame: 961 });
+  backend.renderTo(960);
+  expect(ran).toBe(false);
+  backend.renderTo(1_024);
+  expect(ran).toBe(true);
+});
+
+test("a start at 960 does not count as applied when 960 frames are rendered", async () => {
+  await renderOpened();
+  backend.manual = true;
+  backend.frame = 480;
+  fireEvent.click(screen.getByRole("button", { name: "Play" }));
+  expect(await scheduled("stems_play", 1)).toBe(960);
+  backend.renderTo(960);
+  await nextPoll();
+  expect(backend.applied.playing).toBe(false);
+  expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+
+  backend.renderTo(1_024);
+  await nextPoll();
+  expect(backend.applied.playing).toBe(true);
+  expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+});
+
+test("a stop is kept as the intent until the block after its frame is rendered", async () => {
+  await renderOpened();
+  backend.manual = true;
+  fireEvent.click(screen.getByRole("button", { name: "Play" }));
+  backend.renderTo((await scheduled("stems_play", 1)) + 64);
+  await nextPoll();
+  expect(backend.applied.playing).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+  const frame = await scheduled("stems_pause", 1);
+  backend.renderTo(frame);
+  await nextPoll();
+  expect(backend.applied.playing).toBe(true);
+  expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+
+  backend.renderTo(frame + 64);
+  await nextPoll();
+  expect(backend.applied.playing).toBe(false);
+  expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+});
+
+test("a seek stays shown and pending until the block after its frame is rendered", async () => {
+  await renderOpened();
+  await waitFor(() => expect(backend.outputChanged).not.toBeNull());
+  backend.manual = true;
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  fireEvent.keyDown(position, { key: "End" });
+  const frame = await scheduled("stems_seek", 1);
+  backend.renderTo(frame);
+  await nextPoll();
+  expect(backend.applied.position).toBe(0);
+  expect(position.getAttribute("aria-valuenow")).toBe("180");
+
+  // Still pending, so a restore on a new output carries it.
+  backend.outputChanged?.({ generation: 2, sampleRate: 44_100 });
+  await waitFor(() => expect(called("stems_restore")).toHaveLength(1));
+  expect(called("stems_restore")[0]).toMatchObject({ intent: { seek: 180 } });
+
+  backend.renderTo(backend.lastFrame + 64);
+  await nextPoll();
+  expect(backend.applied.position).toBe(180);
+  expect(position.getAttribute("aria-valuenow")).toBe("180");
 });

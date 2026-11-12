@@ -29,5 +29,5 @@ The app bundles two separate programs as sidecars (`Woodshed.app/Contents/MacOS/
 ### yt-dlp 2026.10.26 (`yt-dlp_macos`)
 
 - yt-dlp itself is released under the Unlicense ([`yt-dlp-LICENSE.txt`](yt-dlp-LICENSE.txt)).
-- The `yt-dlp_macos` release file is a PyInstaller bundle. It includes GPLv3+ licensed code, so that bundle as a combined work is licensed under the GPLv3+. Its components and their licenses are listed in [`yt-dlp-THIRD_PARTY_LICENSES.txt`](yt-dlp-THIRD_PARTY_LICENSES.txt) (from the same tag).
+- The `yt-dlp_macos` release file is a PyInstaller bundle. It includes GPLv3+ licensed code, so that bundle as a combined work is licensed under the GPLv3+. Its components and their licenses are listed in [`yt-dlp-THIRD_PARTY_LICENSES.txt`](yt-dlp-THIRD_PARTY_LICENSES.txt) (from the same tag, trailing whitespace removed).
 - Binary: <https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_macos> (SHA-256 `0f922c15ccc0b83eefa1c8bc9104e434318c4bf16e408e1ee93b7745a6efe0aa`). Source: <https://github.com/yt-dlp/yt-dlp/tree/2026.10.26>.
