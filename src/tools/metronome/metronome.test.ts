@@ -109,6 +109,30 @@ describe("tap tempo", () => {
     expect(tap.tap(1_250)).toBe(240);
   });
 
+  test("slow tempos down to 20 BPM can be tapped, with uneven taps", () => {
+    for (const [interval, bpm] of [
+      [3_000, 20],
+      [2_400, 25],
+      [2_000, 30],
+    ] as const) {
+      const tap = new TapTempo();
+      expect(tap.tap(0)).toBeNull();
+      expect(tap.tap(interval)).toBe(bpm);
+      expect(tap.tap(interval * 2)).toBe(bpm);
+    }
+    const uneven = new TapTempo();
+    uneven.tap(0);
+    uneven.tap(3_100);
+    expect(uneven.tap(6_000)).toBe(20);
+  });
+
+  test("a pause just past the reset starts over", () => {
+    const tap = new TapTempo();
+    tap.tap(0);
+    tap.tap(1_000);
+    expect(tap.tap(1_000 + TAP_RESET_MS + 1)).toBeNull();
+  });
+
   test("results stay within the tempo range", () => {
     const tap = new TapTempo();
     tap.tap(0);
