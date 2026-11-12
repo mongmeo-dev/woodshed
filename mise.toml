@@ -1,0 +1,31 @@
+[tools]
+node = "26.13.0"
+pnpm = "12.18.0"
+rust = { version = "1.99.1", components = "rustfmt,clippy" }
+
+[env]
+CARGO_BUILD_JOBS = "4"
+
+[tasks."check:web"]
+description = "biome, tsc, vitest"
+run = [
+  "pnpm exec biome check .",
+  "pnpm exec tsc --noEmit",
+  "pnpm exec vitest run --maxWorkers=2",
+]
+
+[tasks."check:rust"]
+description = "cargo fmt, clippy, test"
+dir = "src-tauri"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --all-targets --locked -- -D warnings",
+  "cargo test --locked",
+]
+
+[tasks.check]
+description = "Run every check (web, then rust)"
+run = [
+  "mise run check:web",
+  "mise run check:rust",
+]

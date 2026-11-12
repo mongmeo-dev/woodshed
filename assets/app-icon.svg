@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Woodshed</title>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1d1d1f"/>
+  <g stroke="#f5f5f7" stroke-linecap="round">
+    <line x1="362" y1="250" x2="362" y2="774" stroke-width="14"/>
+    <line x1="462" y1="250" x2="462" y2="774" stroke-width="18"/>
+    <line x1="562" y1="250" x2="562" y2="774" stroke-width="22"/>
+    <line x1="662" y1="250" x2="662" y2="774" stroke-width="26"/>
+  </g>
+  <g stroke="#6e6e73" stroke-width="8">
+    <line x1="312" y1="400" x2="712" y2="400"/>
+    <line x1="312" y1="560" x2="712" y2="560"/>
+  </g>
+  <circle cx="562" cy="480" r="40" fill="#2997ff"/>
+</svg>
