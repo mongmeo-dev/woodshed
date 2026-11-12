@@ -7,10 +7,12 @@
 //! - [`timeline`]: pure beat generator with exact integer frame positions.
 //! - [`scheduler`]: feeds the timeline into the engine ahead of time and
 //!   handles changes and output switches.
+//! - [`store`]: last settings and presets in `metronome.json`.
 
 pub mod pattern;
 pub mod scheduler;
 pub mod source;
+pub mod store;
 pub mod timeline;
 
 pub use pattern::{Accent, MetronomeSettings, Polyrhythm, Sound, Trainer, TrainerEnd};
