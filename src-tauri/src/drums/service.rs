@@ -50,7 +50,8 @@ pub struct DrumState {
 struct Inner {
     sequencer: Sequencer,
     announcer: Announcer,
-    channel: Option<Channel<StepEvent>>,
+    /// The screen's step channel and its subscription token.
+    channel: Option<(u64, Channel<StepEvent>)>,
 }
 
 impl Inner {
@@ -60,7 +61,7 @@ impl Inner {
     }
 
     fn send(&mut self, outbox: Vec<StepEvent>) {
-        let Some(channel) = &self.channel else {
+        let Some((_, channel)) = &self.channel else {
             return;
         };
         for event in outbox {
@@ -225,10 +226,19 @@ impl DrumService {
     }
 
     /// Makes `channel` the screen's step channel and announces what is
-    /// already scheduled.
-    pub fn subscribe(&self, channel: Channel<StepEvent>) {
+    /// already scheduled. `token` increases with each subscription on the
+    /// screen side, so a late-arriving older subscription cannot replace a
+    /// newer one.
+    pub fn subscribe(&self, channel: Channel<StepEvent>, token: u64) {
         let mut inner = lock(&self.inner);
-        inner.channel = Some(channel);
+        if inner
+            .channel
+            .as_ref()
+            .is_some_and(|(current, _)| *current > token)
+        {
+            return;
+        }
+        inner.channel = Some((token, channel));
         let mut outbox = Vec::new();
         {
             let engine = lock(&self.engine);
@@ -356,13 +366,15 @@ pub async fn drums_set_pattern(
         .map_err(|error| error.to_string())
 }
 
-/// Registers the screen's channel for [`StepEvent`]s (replacing an earlier one).
+/// Registers the screen's channel for [`StepEvent`]s, replacing one with a
+/// lower `token`.
 #[tauri::command]
 pub async fn drums_subscribe(
     drums: State<'_, DrumService>,
     on_event: Channel<StepEvent>,
+    token: u64,
 ) -> Result<(), String> {
-    drums.subscribe(on_event);
+    drums.subscribe(on_event, token);
     Ok(())
 }
 

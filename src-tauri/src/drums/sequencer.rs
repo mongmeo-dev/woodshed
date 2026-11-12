@@ -162,9 +162,13 @@ impl Sequencer {
             let exact = self.step_frame(step).round();
             let frame = if exact >= floor {
                 exact as FramePos
-            } else if floor - exact <= self.frames_per_step / 2.0 {
+            } else if floor - exact <= self.frames_per_step / 2.0
+                && self.step_frame(step + 1).round() > floor
+            {
                 // A change moved this step just behind the reschedule point
-                // before it played: play it now rather than drop it.
+                // before it played: play it there rather than drop it. Only
+                // the last step behind the point qualifies, so no two land
+                // on the same frame.
                 self.floor
             } else {
                 self.next_step += 1;

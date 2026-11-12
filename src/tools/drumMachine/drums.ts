@@ -246,9 +246,12 @@ export async function deletePattern(name: string): Promise<SavedPattern[]> {
   return call<SavedPattern[]>("drums_delete_pattern", { name }, []);
 }
 
+/** Increases with every subscription, also across webview reloads. */
+let subscriptionToken = Date.now();
+
 /**
  * Receives the steps as they are scheduled, each with the time it is heard.
- * The app keeps one step channel; subscribing again replaces it.
+ * The app keeps one step channel: the subscription with the highest token.
  */
 export function subscribeSteps(listener: (event: StepEvent) => void): () => void {
   if (!inTauri()) return () => {};
@@ -257,7 +260,10 @@ export function subscribeSteps(listener: (event: StepEvent) => void): () => void
   channel.onmessage = (event) => {
     if (active) listener(event);
   };
-  call("drums_subscribe", { onEvent: channel }, undefined).catch(() => {});
+  subscriptionToken += 1;
+  call("drums_subscribe", { onEvent: channel, token: subscriptionToken }, undefined).catch(
+    () => {},
+  );
   return () => {
     active = false;
   };
