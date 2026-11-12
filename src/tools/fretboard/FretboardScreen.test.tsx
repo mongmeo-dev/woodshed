@@ -92,6 +92,21 @@ test("a black-key root takes the spelling of the chosen scale", () => {
   expect(screen.getByRole("heading", { name: "C♯ Natural Minor" })).toBeTruthy();
 });
 
+test("modes are spelled the way the key's notation spells them", () => {
+  render(<FretboardScreen />);
+  fireEvent.change(screen.getByLabelText("Scale"), { target: { value: "dorian" } });
+  fireEvent.change(screen.getByLabelText("Key"), { target: { value: "1" } });
+  expect(screen.getByRole("heading", { name: "C♯ Dorian" })).toBeTruthy();
+  expect(scaleTexts(".scale-note-name")).toEqual(["C♯", "D♯", "E", "F♯", "G♯", "A♯", "B"]);
+  expect(scaleTexts(".scale-note-interval")).toEqual(["1", "2", "♭3", "4", "5", "6", "♭7"]);
+
+  fireEvent.change(screen.getByLabelText("Scale"), { target: { value: "lydian" } });
+  fireEvent.change(screen.getByLabelText("Key"), { target: { value: "6" } });
+  expect(screen.getByRole("heading", { name: "G♭ Lydian" })).toBeTruthy();
+  expect(scaleTexts(".scale-note-name")).toEqual(["G♭", "A♭", "B♭", "C", "D♭", "E♭", "F"]);
+  expect(scaleTexts(".scale-note-interval")).toEqual(["1", "2", "3", "♯4", "5", "6", "7"]);
+});
+
 test("the display switch shows intervals instead of note names", () => {
   render(<FretboardScreen />);
   expect(markerLabels()).toContain("C");
