@@ -1275,8 +1275,10 @@ fn pytorch_excerpt() -> Vec<f32> {
     let bytes = include_bytes!("testdata/band_pytorch_excerpt.f32");
     assert_eq!(bytes.len(), SOURCES * 2 * REFERENCE_FRAMES * 4);
     bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect()
 }
 
