@@ -7,13 +7,19 @@ use tauri::{Manager, State};
 
 use settings::{Settings, SettingsStore};
 
+// Async so they never run on the webview's IPC (main) thread; a save writes
+// a file.
+
 #[tauri::command]
-fn settings_load(store: State<'_, SettingsStore>) -> Settings {
-    store.get()
+async fn settings_load(store: State<'_, SettingsStore>) -> Result<Settings, String> {
+    Ok(store.get())
 }
 
 #[tauri::command]
-fn settings_save(store: State<'_, SettingsStore>, settings: Settings) -> Result<Settings, String> {
+async fn settings_save(
+    store: State<'_, SettingsStore>,
+    settings: Settings,
+) -> Result<Settings, String> {
     store
         .update(|current| {
             // The output device belongs to the audio output manager

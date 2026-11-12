@@ -42,7 +42,10 @@ pub struct Settings {
 
 pub struct SettingsStore {
     path: PathBuf,
+    /// Cached copy. Held only to read or swap it, never during file I/O.
     current: Mutex<Settings>,
+    /// Serializes writers (read, change, write the file, swap the cache).
+    writer: Mutex<()>,
 }
 
 impl SettingsStore {
@@ -63,6 +66,7 @@ impl SettingsStore {
         Self {
             path,
             current: Mutex::new(current),
+            writer: Mutex::new(()),
         }
     }
 
@@ -73,20 +77,25 @@ impl SettingsStore {
             .clone()
     }
 
-    /// Changes the settings in one step: under a single lock it takes the
-    /// current value, applies `change`, writes the file (temp file + rename)
-    /// and updates the cached copy. Every writer changes only its own fields
-    /// this way, so concurrent owners (the screen, the output manager, the
-    /// tuner) never undo each other. If writing fails, nothing changes.
+    /// Changes the settings in one step: writers take turns, and each takes
+    /// the current value, applies `change`, writes the file (temp file +
+    /// rename) and then swaps the cached copy. Every writer changes only its
+    /// own fields this way, so concurrent owners (the screen, the output
+    /// manager, the tuner) never undo each other. Readers ([`Self::get`])
+    /// wait for no file I/O: they see the old value until the swap. If
+    /// writing fails, nothing changes.
     pub fn update(&self, change: impl FnOnce(&mut Settings)) -> io::Result<Settings> {
-        let mut current = self
-            .current
+        let _turn = self
+            .writer
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut next = current.clone();
+        let mut next = self.get();
         change(&mut next);
         self.write(&next)?;
-        *current = next.clone();
+        *self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next.clone();
         Ok(next)
     }
 
@@ -211,6 +220,38 @@ mod tests {
             assert_eq!(settings.language, Some(Language::En));
             assert_eq!(settings.theme, Theme::Dark);
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reading_does_not_wait_for_a_save_in_progress() {
+        use std::sync::{Arc, mpsc};
+        use std::time::{Duration, Instant};
+
+        let dir = temp_dir("read-during-save");
+        let store = Arc::new(SettingsStore::load(&dir));
+        let (started, wait_started) = mpsc::channel();
+        let (release, wait_release) = mpsc::channel::<()>();
+        let writer = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                store
+                    .update(|s| {
+                        // Stands in for a slow write: the writer is mid-save.
+                        started.send(()).unwrap();
+                        wait_release.recv().unwrap();
+                        s.theme = Theme::Dark;
+                    })
+                    .unwrap();
+            })
+        };
+        wait_started.recv().unwrap();
+        let begun = Instant::now();
+        assert_eq!(store.get().theme, Theme::System, "old value until saved");
+        assert!(begun.elapsed() < Duration::from_millis(50), "read waited");
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        assert_eq!(store.get().theme, Theme::Dark);
         let _ = fs::remove_dir_all(&dir);
     }
 }
