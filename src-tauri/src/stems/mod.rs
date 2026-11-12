@@ -28,7 +28,7 @@ pub use library::{
     Library, LibraryError, Manifest, SongSource, StemEntry, StemName, StemStatus, TrackName,
 };
 pub use player::{FeederThread, PlayerError, StemPlayer};
-pub use reader::LoopRange;
+pub use reader::{LoopRange, MIN_LOOP_FRAMES};
 pub use source::{PlayerShared, StemSource, loop_events, param};
 pub use track::{MemoryTrack, TrackError, TrackReader, WavTrack};
 pub use youtube::{ProcessControl, Tools, YoutubeLink, parse_youtube_link};

@@ -5,6 +5,9 @@ use std::f32::consts::FRAC_PI_2;
 
 use super::track::TrackReader;
 
+/// Shortest A-B loop the player accepts; shorter loops are ignored (no loop).
+pub const MIN_LOOP_FRAMES: u64 = 256;
+
 /// A loop region in song frames: `start` inclusive, `end` exclusive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoopRange {
