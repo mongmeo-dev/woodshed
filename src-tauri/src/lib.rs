@@ -1,5 +1,6 @@
 pub mod app_audio;
 pub mod audio;
+pub mod drums;
 pub mod settings;
 pub mod tuner;
 
@@ -47,7 +48,9 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            let drums = drums::DrumService::start(audio.engine(), &data_dir)?;
             app.manage(audio);
+            app.manage(drums);
             let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
             app.manage(tuner);
             Ok(())
@@ -66,6 +69,12 @@ pub fn run() {
             tuner::service::tuner_select_input,
             tuner::service::tuner_set_reference,
             tuner::service::tuner_open_microphone_settings,
+            drums::service::drums_state,
+            drums::service::drums_set_playing,
+            drums::service::drums_set_pattern,
+            drums::service::drums_subscribe,
+            drums::service::drums_save_pattern,
+            drums::service::drums_delete_pattern,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")
