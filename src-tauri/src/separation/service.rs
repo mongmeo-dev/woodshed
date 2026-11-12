@@ -261,10 +261,13 @@ impl Worker {
                 Task::WarmUp => {
                     let started = Instant::now();
                     match self.warm_up(&stft, &mut loaded) {
-                        Ok(()) => log::info!(
-                            "stem model warmed up in {:.1}s",
-                            started.elapsed().as_secs_f64()
-                        ),
+                        Ok(()) => {
+                            crate::startup::mark("stem model warmed up");
+                            log::info!(
+                                "stem model warmed up in {:.1}s",
+                                started.elapsed().as_secs_f64()
+                            );
+                        }
                         Err(error) => log::warn!("stem model warm-up skipped: {error}"),
                     }
                     loaded.idle_since = Instant::now();

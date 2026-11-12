@@ -178,6 +178,7 @@ impl OutputEnv for TauriOutputEnv {
     fn open(&mut self, device: Option<&str>) -> Result<OpenedOutput, String> {
         // Build without holding the engine (device lookup and stream creation
         // can be slow); only the swap itself takes the lock.
+        crate::startup::mark("first output open started");
         let starter = lock(&self.engine).output_starter();
         let pending = starter
             .build(&OutputRequest {
@@ -189,6 +190,7 @@ impl OutputEnv for TauriOutputEnv {
         let info = engine
             .commit_output(pending)
             .map_err(|error| error.to_string())?;
+        crate::startup::mark("first output open finished");
         Ok(opened_output(&info, engine.generation()))
     }
 
@@ -208,7 +210,10 @@ impl OutputEnv for TauriOutputEnv {
     }
 
     fn snapshot(&mut self) -> DeviceSnapshot {
-        DeviceSnapshot::capture()
+        crate::startup::mark("first device list started");
+        let snapshot = DeviceSnapshot::capture();
+        crate::startup::mark("first device list finished");
+        snapshot
     }
 
     fn save_preferred(&mut self, preferred: Option<&str>) -> Result<(), String> {
@@ -283,6 +288,7 @@ fn log_latency_when_ready(engine: Arc<Mutex<AudioEngine>>) {
                 continue;
             }
             if let Some(latency) = engine.output_latency() {
+                crate::startup::mark("first output playing");
                 log::info!(
                     "audio output: device=\"{}\" sample_rate={} channels={} buffer_requested={:?} buffer_reported={:?} callback_frames={} output_latency_ms={:.2}",
                     info.device_name,
