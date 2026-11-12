@@ -15,6 +15,13 @@ import {
 export interface LatestFrame {
   levelDb: number;
   pitch: Reading | null;
+  /** Bumped when earlier readings no longer apply (input lost or changed). */
+  epoch: number;
+}
+
+/** Whether readings from before `next` still describe the running input. */
+export function keepsReadings(previous: TunerStatus, next: TunerStatus): boolean {
+  return next.state === "listening" && next.inputGeneration === previous.inputGeneration;
 }
 
 // Start and stop run in call order (a quick remount must not end stopped).
@@ -39,23 +46,36 @@ export function useTuner(): TunerControls {
   const [status, setStatus] = useState<TunerStatus>(DEFAULT_STATUS);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
-  const latest = useRef<LatestFrame>({ levelDb: -100, pitch: null });
+  const latest = useRef<LatestFrame>({ levelDb: -100, pitch: null, epoch: 0 });
+  const current = useRef<TunerStatus>(DEFAULT_STATUS);
 
   useEffect(() => {
     let active = true;
+    let heard = false;
+    const applyStatus = (next: TunerStatus) => {
+      if (!keepsReadings(current.current, next)) {
+        // No frame may arrive any more (input gone, permission off): drop the
+        // last reading now instead of leaving it on screen.
+        latest.current = { levelDb: -100, pitch: null, epoch: latest.current.epoch + 1 };
+      }
+      current.current = next;
+      setStatus(next);
+    };
     void inOrder(() =>
       startTuner((event) => {
         if (!active) return;
         if (event.type === "status") {
           const { type: _, ...next } = event;
-          setStatus(next);
+          heard = true;
+          applyStatus(next);
         } else {
-          latest.current = { levelDb: event.levelDb, pitch: event.pitch };
+          latest.current = { ...latest.current, levelDb: event.levelDb, pitch: event.pitch };
         }
       }),
     ).then(
       (initial) => {
-        if (active) setStatus(initial);
+        // A status from the channel is newer than this snapshot.
+        if (active && !heard) applyStatus(initial);
       },
       () => {},
     );

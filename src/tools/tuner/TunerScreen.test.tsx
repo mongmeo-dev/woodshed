@@ -92,6 +92,60 @@ test("a frame shows the note, cents and frequency", async () => {
   expect(meter.value).toBe(67);
 });
 
+for (const state of ["noInput", "permissionDenied"] as const) {
+  test(`losing the input (${state}) clears the last reading at once`, async () => {
+    render(<TunerScreen />);
+    await screen.findByRole("heading", { name: "Tuner" });
+    act(() => {
+      calls.onEvent?.({
+        type: "status",
+        ...DEFAULT_STATUS,
+        state: "listening",
+        inputGeneration: 1,
+      });
+      calls.onEvent?.({
+        type: "frame",
+        levelDb: -20,
+        pitch: { frequency: 82.4, midi: 40, cents: 0.4, clarity: 0.99 },
+      });
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    const readout = document.querySelector(".tuner-readout");
+    expect(readout?.getAttribute("data-in-tune")).toBe("true");
+
+    // Only a status arrives; no frame follows.
+    act(() => {
+      calls.onEvent?.({ type: "status", ...DEFAULT_STATUS, state, inputGeneration: 1 });
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(readout?.getAttribute("data-active")).toBe("false");
+    expect(readout?.getAttribute("data-in-tune")).toBe("false");
+    expect(screen.getByRole("status", { name: "Note" }).textContent).toBe("–");
+    const meter = screen.getByRole("meter", { name: "Input Level" }) as HTMLMeterElement;
+    expect(meter.value).toBe(0);
+  });
+}
+
+test("a new input stream clears readings from the old one", async () => {
+  render(<TunerScreen />);
+  await screen.findByRole("heading", { name: "Tuner" });
+  act(() => {
+    calls.onEvent?.({ type: "status", ...DEFAULT_STATUS, state: "listening", inputGeneration: 1 });
+    calls.onEvent?.({
+      type: "frame",
+      levelDb: -20,
+      pitch: { frequency: 110, midi: 45, cents: 0, clarity: 0.99 },
+    });
+  });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(screen.getByRole("status", { name: "Note" }).textContent).toBe("A2");
+  act(() => {
+    calls.onEvent?.({ type: "status", ...DEFAULT_STATUS, state: "listening", inputGeneration: 2 });
+  });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(screen.getByRole("status", { name: "Note" }).textContent).toBe("–");
+});
+
 test("the reference pitch steps by 1 Hz and stops at the range ends", async () => {
   render(<TunerScreen />);
   const raise = await screen.findByRole("button", { name: "Raise Reference Pitch" });

@@ -65,6 +65,9 @@ pub struct TunerStatus {
     pub preferred_device_id: Option<String>,
     pub channel: InputChannel,
     pub reference_hz: u16,
+    /// Changes whenever the input stream is (re)opened or restarted after a
+    /// gap; readings from before belong to another stream.
+    pub input_generation: u64,
 }
 
 /// Sent to the screen over the channel given to `tuner_start`.
@@ -129,6 +132,7 @@ fn stopped_status(settings: &TunerSettings) -> TunerStatus {
         preferred_device_id: settings.input_device_id.clone(),
         channel: settings.input_channel,
         reference_hz: clamp_reference(settings.reference_hz),
+        input_generation: 0,
     }
 }
 
@@ -279,6 +283,7 @@ fn publish(shared: &Shared, status: TunerStatus) {
 
 fn status_of(
     supervisor: &InputSupervisor<CpalInputEnv>,
+    pump: Option<&InputPump>,
     permission: MicPermission,
     reference_hz: u16,
 ) -> TunerStatus {
@@ -295,6 +300,7 @@ fn status_of(
         preferred_device_id: supervisor.preferred().map(str::to_owned),
         channel: supervisor.channel(),
         reference_hz,
+        input_generation: supervisor.generation() + pump.map_or(0, InputPump::restarts),
     }
 }
 
@@ -412,7 +418,10 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
             }
         }
 
-        publish(shared, status_of(&supervisor, permission, reference_hz));
+        publish(
+            shared,
+            status_of(&supervisor, pump.as_ref(), permission, reference_hz),
+        );
         std::thread::sleep(POLL);
     }
 }
