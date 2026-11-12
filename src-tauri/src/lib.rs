@@ -3,6 +3,7 @@ pub mod audio;
 pub mod drums;
 pub mod metronome;
 pub mod settings;
+pub mod stems;
 pub mod tuner;
 
 use tauri::{Manager, State};
@@ -40,6 +41,7 @@ async fn settings_save(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -54,6 +56,10 @@ pub fn run() {
             app.manage(audio);
             app.manage(metronome);
             app.manage(drums);
+            app.manage(stems::StemService::new(
+                &data_dir,
+                app.path().app_cache_dir()?,
+            ));
             let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
             app.manage(tuner);
             Ok(())
@@ -85,11 +91,29 @@ pub fn run() {
             drums::service::drums_subscribe,
             drums::service::drums_save_pattern,
             drums::service::drums_delete_pattern,
+            stems::stems_list,
+            stems::stems_pick_file,
+            stems::stems_import_file,
+            stems::stems_import_link,
+            stems::stems_cancel_import,
+            stems::stems_delete,
+            stems::stems_open,
+            stems::stems_close,
+            stems::stems_play,
+            stems::stems_pause,
+            stems::stems_seek,
+            stems::stems_set_speed,
+            stems::stems_set_loop,
+            stems::stems_set_track,
+            stems::stems_set_master,
+            stems::stems_transport,
+            stems::stems_restore,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                app.state::<stems::StemService>().shutdown();
                 app.state::<tuner::TunerService>().shutdown();
                 app.state::<app_audio::AudioService>().shutdown();
             }

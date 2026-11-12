@@ -6,6 +6,7 @@ import { ToolScreen } from "./shell/ToolScreen";
 import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import { FretboardScreen } from "./tools/fretboard/FretboardScreen";
 import { MetronomeScreen } from "./tools/metronome/MetronomeScreen";
+import { StemSplitterScreen } from "./tools/stemSplitter/StemSplitterScreen";
 import type { ViewId } from "./tools/tools";
 import { TunerScreen } from "./tools/tuner/TunerScreen";
 
@@ -24,6 +25,8 @@ export function App() {
             <TunerScreen />
           ) : view === "drumMachine" ? (
             <DrumMachineScreen />
+          ) : view === "stemSplitter" ? (
+            <StemSplitterScreen />
           ) : view === "fretboard" ? (
             <FretboardScreen />
           ) : (

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run --maxWorkers=2",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "binaries": "sh scripts/fetch-binaries.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
