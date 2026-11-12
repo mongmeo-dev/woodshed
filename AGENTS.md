@@ -30,6 +30,8 @@
 
 - 도구 목록: `src/tools/tools.ts`의 `TOOL_IDS`(`tuner`, `metronome`, `drumMachine`, `stemSplitter`, `fretboard`). 각 도구 노드는 `src/tools/<도구>/`에 화면을 만들고 `src/App.tsx`에서 `ToolScreen` 대신 연결합니다.
 - 설정: `src-tauri/src/settings.rs`(`Settings`)와 `src/lib/settings.ts`가 짝입니다. 필드를 추가하면 둘 다 고치고, 누락 필드는 기본값으로 읽히게 합니다(`#[serde(default)]`).
+  - 설정 파일 쓰기는 `SettingsStore::update(|s| ...)`로 자기 필드만 바꿉니다. 쓰기는 차례대로(현재값 읽기·변경·파일 쓰기·캐시 교체) 일어나 다른 소유자(화면, 출력 관리자, 튜너)의 변경을 되돌리지 않고, 읽기(`get`, `settings_load`)는 파일 쓰기를 기다리지 않습니다. `get()` 후 `save()`로 통째로 쓰지 않습니다.
+  - 예외: `Settings.tuner`(입력 장치·채널·기준음)는 튜너 명령(`tuner_select_input`, `tuner_set_reference`)이 소유하고 `settings_save`가 보존하므로 `src/lib/settings.ts`에 두지 않습니다. 튜너 화면은 `tuner_start`가 돌려주는 상태를 씁니다.
 - 프런트↔Rust 타입은 `src/lib/audio.ts`가 Rust serde 타입(camelCase)을 그대로 옮긴 것입니다. 한쪽을 바꾸면 다른 쪽도 바꿉니다.
 - 플랫폼 전용 코드는 `#[cfg(target_os = "...")]`로 격리합니다.
 

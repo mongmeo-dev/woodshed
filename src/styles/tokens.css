@@ -12,6 +12,11 @@
     "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
     sans-serif;
 
+  /* hero-display: 56 / 600 / 1.07 / -0.28px (tuner note) */
+  --ws-type-hero-size: 56px;
+  --ws-type-hero-weight: 600;
+  --ws-type-hero-leading: 1.07;
+  --ws-type-hero-tracking: -0.28px;
   /* display-md: 34 / 600 / 1.47 / -0.374px (line-height tightened for single-line titles) */
   --ws-type-title-size: 34px;
   --ws-type-title-weight: 600;
@@ -65,6 +70,21 @@
   /* Layout */
   --ws-sidebar-width: 224px;
   --ws-titlebar-height: 52px;
+
+  /* Drum machine sizes */
+  --ws-drum-border-width: 1px;
+  --ws-drum-control-height: 32px; /* fields and buttons, as .select and .button-primary */
+  --ws-drum-compact-size: 28px; /* step cells and the mute button */
+  --ws-drum-icon-size: 18px;
+  --ws-drum-play-width: 88px;
+  --ws-drum-number-width: 64px;
+  --ws-drum-name-width: 200px;
+  --ws-drum-slider-width: 104px;
+  --ws-drum-value-width: 3em;
+  --ws-drum-track-label-width: 112px;
+  --ws-drum-volume-width: 64px;
+  --ws-drum-grid-min-width: 560px;
+  --ws-drum-ruler-height: 16px;
 
   color-scheme: light;
 

@@ -1,0 +1,258 @@
+/* Tuner screen. Tokens only (src/styles/tokens.css). */
+
+.tuner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-xl);
+  max-width: 640px;
+}
+
+/* ---- readout -------------------------------------------------------------- */
+
+.tuner-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ws-space-lg);
+  padding: var(--ws-space-xl) var(--ws-space-lg);
+  background: var(--ws-color-surface);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-lg);
+}
+
+.tuner-note {
+  display: inline-flex;
+  align-items: baseline;
+  min-height: calc(var(--ws-type-hero-size) * var(--ws-type-hero-leading));
+  font-family: var(--ws-font-display);
+  font-size: var(--ws-type-hero-size);
+  font-weight: var(--ws-type-hero-weight);
+  line-height: var(--ws-type-hero-leading);
+  letter-spacing: var(--ws-type-hero-tracking);
+  color: var(--ws-color-text);
+  transition:
+    color var(--ws-duration-fast) var(--ws-ease-glide),
+    opacity var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.tuner-note-octave {
+  margin-left: var(--ws-space-xxs);
+  font-family: var(--ws-font-text);
+  font-size: var(--ws-type-section-size);
+  font-weight: 400;
+  letter-spacing: var(--ws-type-section-tracking);
+  color: var(--ws-color-text-tertiary);
+}
+
+.tuner-readout[data-in-tune="true"] .tuner-note-name {
+  color: var(--ws-color-accent);
+}
+
+/* Cents scale: −50 … +50, needle moved by translateX(cents %). */
+.tuner-scale {
+  position: relative;
+  width: 100%;
+  height: var(--ws-space-xxl);
+  border-bottom: 1px solid var(--ws-color-hairline);
+}
+
+.tuner-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: var(--ws-space-sm);
+  background: var(--ws-color-hairline);
+  transform: translateX(-50%);
+}
+
+.tuner-tick[data-center="true"] {
+  height: var(--ws-space-lg);
+  background: var(--ws-color-text-tertiary);
+}
+
+.tuner-needle-track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.tuner-needle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: 100%;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-text);
+  transform: translateX(-50%);
+  transition:
+    background-color var(--ws-duration-fast) var(--ws-ease-glide),
+    opacity var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.tuner-readout[data-active="false"] .tuner-needle {
+  opacity: 0;
+}
+
+.tuner-readout[data-in-tune="true"] .tuner-needle {
+  background: var(--ws-color-accent);
+}
+
+.tuner-values {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  color: var(--ws-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.tuner-readout[data-active="false"] .tuner-note,
+.tuner-readout[data-active="false"] .tuner-values {
+  opacity: 0.4;
+}
+
+/* Input level */
+.tuner-level {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-sm);
+  width: 100%;
+}
+
+.tuner-level-label {
+  flex: none;
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+}
+
+.tuner-meter {
+  flex: 1;
+  height: var(--ws-space-xxs);
+  border: 0;
+  appearance: none;
+  background: none;
+}
+
+.tuner-meter::-webkit-meter-bar {
+  height: var(--ws-space-xxs);
+  border: 0;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-control);
+}
+
+.tuner-meter::-webkit-meter-optimum-value,
+.tuner-meter::-webkit-meter-suboptimum-value,
+.tuner-meter::-webkit-meter-even-less-good-value {
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-text-tertiary);
+  transition: none;
+}
+
+/* ---- notices -------------------------------------------------------------- */
+
+.tuner-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-md);
+  margin: 0;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+}
+
+/* ---- open strings --------------------------------------------------------- */
+
+.tuner-strings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-md);
+}
+
+.tuner-string-list {
+  display: flex;
+  gap: var(--ws-space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tuner-string {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: var(--ws-space-xl);
+  padding: var(--ws-space-xxs) var(--ws-space-xs);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+  transition:
+    color var(--ws-duration-fast) var(--ws-ease-glide),
+    border-color var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.tuner-string-octave {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-fine-size);
+  letter-spacing: var(--ws-type-fine-tracking);
+}
+
+.tuner-string[data-current="true"] {
+  border-color: var(--ws-color-accent);
+  color: var(--ws-color-accent);
+  font-weight: 600;
+}
+
+/* ---- reference stepper ---------------------------------------------------- */
+
+.tuner-stepper {
+  display: inline-flex;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  align-items: center;
+  gap: var(--ws-space-xs);
+}
+
+.tuner-reference {
+  min-width: calc(var(--ws-space-xxl) * 2);
+  text-align: center;
+}
+
+.tuner-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ws-space-xl);
+  height: var(--ws-space-xl);
+  padding: 0;
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text);
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.tuner-step:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.tuner-step:disabled {
+  color: var(--ws-color-text-tertiary);
+}
+
+.tuner-step svg {
+  width: var(--ws-space-sm);
+  height: var(--ws-space-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
