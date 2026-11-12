@@ -1,3 +1,4 @@
+pub mod app_audio;
 pub mod audio;
 pub mod settings;
 
@@ -26,11 +27,19 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
+            let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            app.manage(audio);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             settings_load,
             settings_save,
+            app_audio::audio_status,
+            app_audio::audio_list_devices,
+            app_audio::audio_set_output_device,
+            app_audio::audio_subscribe,
+            app_audio::audio_heard_at,
+            app_audio::audio_play_test_sound,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Woodshed");

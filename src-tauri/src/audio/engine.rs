@@ -14,6 +14,7 @@ use super::device::{
     nanos, open_output_stream,
 };
 use super::handle::EngineHandle;
+use super::shared::EngineStats;
 use super::types::{FramePos, RenderedEvent, StreamFormat};
 
 /// How to open the output device.
@@ -76,6 +77,10 @@ impl AudioEngine {
 
     pub fn format(&self) -> StreamFormat {
         self.handle.format()
+    }
+
+    pub fn stats(&self) -> EngineStats {
+        self.handle.stats()
     }
 
     pub fn output_info(&self) -> Option<&OutputStreamInfo> {
