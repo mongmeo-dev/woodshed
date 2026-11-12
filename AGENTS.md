@@ -96,15 +96,19 @@ impl Source for Click {
 ### 출력 관리자 (출력의 단일 소유자)
 
 - 출력 스트림을 열고 바꾸고 복구하는 일은 `audio-output` 스레드의 `OutputManager`(`src-tauri/src/audio/output_manager.rs`)만 합니다. 다른 코드는 `AudioEngine::open_output`을 직접 부르지 않습니다.
-  - 수동 선택: 명령 `audio_set_output_device({ deviceId })`가 관리자에게 채널로 요청하고 응답을 기다립니다. 요청과 1초 주기 감시 틱은 같은 스레드에서 도착 순서대로 처리됩니다.
-  - 성공하면 새 `AudioStatus`, 실패하면 `{ code: "openFailed" | "saveFailed" | "unavailable" }`(`src/lib/audio.ts`의 `OutputSelectError`). `openFailed`·`saveFailed`여도 선택은 실행 중 선호로 적용됩니다(`openFailed`면 기본 장치로 재생하며 선택 장치를 재시도, `saveFailed`면 새 출력으로 재생하지만 디스크에는 이전 값).
-  - 출력 장치 값은 관리자 소유라 `settings_save`는 `outputDeviceId`를 바꾸지 않습니다.
+  - 수동 선택: async 명령 `audio_set_output_device({ deviceId })`가 관리자에게 기한(10초) 있는 요청을 보내고 블로킹 풀에서 응답을 기다립니다(웹뷰 IPC 스레드를 막지 않음). 실행 루프는 `run_output_manager`이고, 대기 중인 요청을 다음 틱보다 먼저 도착 순서대로 처리합니다. 다음 틱은 이전 틱이 끝난 뒤 1초입니다.
+  - 착수 시점에 기한이 지난 요청은 실행하지 않고 버립니다. 착수한 요청은 기한이 지나도 끝까지 적용하고, 결과는 `audio://output-changed`와 `audio_status().preferredDeviceId`로 드러납니다.
+  - 성공하면 처리 당시 상태 `{ output, preferredDeviceId }`, 실패하면 `{ code: "openFailed" | "saveFailed" | "unavailable" }`(`src/lib/audio.ts`의 `OutputSelectError`). `openFailed`·`saveFailed`여도 선택은 실행 중 선호로 적용됩니다(`openFailed`면 기본 장치로 재생하며 선택 장치를 재시도, `saveFailed`면 새 출력으로 재생하지만 디스크에는 이전 값). `unavailable`이면 나중에 적용될 수 있으므로 화면은 `preferredDeviceId`를 따릅니다.
+  - `AudioStatus.preferredDeviceId`가 실행 중 선호의 기준입니다(재생 중인 장치나 설정 파일과 다를 수 있음). 출력 장치 값은 관리자 소유라 `settings_save`는 `outputDeviceId`를 바꾸지 않습니다.
+  - 엔진을 잠그거나 장치를 조회하는 명령은 모두 async입니다. 새 명령도 그렇게 만듭니다.
+  - 앱 종료 시 `AudioService::shutdown`이 `Shutdown` 요청을 보내고 스레드를 회수합니다.
 - 상태 머신(`OutputMode`).
   - `OnTarget`: 선호 장치(없으면 시스템 기본값)로 재생 중. 매 틱 출력 부재·스트림 오류(Xrun 제외)·장치 분리·기본 장치 변경(기본값 모드만)·장치 샘플레이트 변경을 검사해 처음부터 다시 엽니다.
   - `Fallback { preferred_retry }`: 선호 장치를 쓸 수 없어 기본값으로 재생 중. 선호 복귀 시도는 백오프(실패마다 1→30초 두 배)로만 하고, 폴백이 정상이면 건드리지 않습니다.
   - `Failed { retry }`: 아무것도 열리지 않음. 같은 백오프로 재시도.
   - 백오프는 장치 목록 변경·사용자 선택·선호 장치 성공 때만 초기화됩니다.
-- 출력 교체는 새 스트림을 먼저 빌드하고 성공했을 때만 이전 스트림을 멈춥니다. 실패하면 기존 출력이 끊김 없이 계속 재생되고 세대도 바뀌지 않습니다.
+- 출력 교체: 새 스트림을 엔진 락 밖에서 빌드(`OutputStarter`)하고, `commit_output`에서 이전 스트림을 일시정지 → reformat → 새 스트림 재생 순으로 바꿉니다. 빌드가 실패하면 기존 출력은 손대지 않습니다. 새 스트림 재생이 실패하면 코어를 이전 포맷·세대로 되돌리고 이전 스트림을 다시 재생합니다. 어느 실패든 세대는 바뀌지 않습니다.
+- 장치 목록은 틱과 선택 모두 같은 경로(`observe_devices`)로 관찰하므로, 어느 입력이 먼저 보든 변경 알림은 한 번 나갑니다.
 - 이벤트 불변식.
   - `audio://output-changed` (`{ generation, deviceId, sampleRate, channels, bufferFrames }`): 출력 열기 성공마다 정확히 1회, 성공 지점에서 발행합니다(이후 설정 저장 실패와 무관). 프런트는 `onOutputChanged`로 받습니다.
   - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 틱에만. 입력을 쓰는 노드는 이를 받아 입력을 다시 엽니다.
