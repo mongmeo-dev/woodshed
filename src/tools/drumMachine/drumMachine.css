@@ -1,0 +1,267 @@
+/* Drum machine screen. Tokens only (src/styles/tokens.css). */
+
+.drum-machine {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-md);
+  min-width: 0;
+}
+
+.drum-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ws-space-sm) var(--ws-space-lg);
+}
+
+.drum-field {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-xs);
+}
+
+.drum-field-label {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+}
+
+.drum-play {
+  justify-content: center;
+  min-width: 88px;
+}
+
+.drum-number,
+.drum-text {
+  min-height: 32px;
+  padding: 0 var(--ws-space-xs);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text);
+  font: inherit;
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.drum-number {
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.drum-text {
+  width: 200px;
+}
+
+.drum-number[aria-invalid="true"],
+.drum-text[aria-invalid="true"] {
+  border-color: var(--ws-color-accent);
+}
+
+.drum-slider,
+.drum-volume {
+  accent-color: var(--ws-color-accent);
+}
+
+.drum-slider {
+  width: 120px;
+}
+
+.drum-value {
+  min-width: 3em;
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-type-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.drum-error {
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-caption-size);
+}
+
+.drum-button {
+  min-height: 32px;
+  padding: 0 var(--ws-space-sm);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.drum-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.drum-button:disabled {
+  color: var(--ws-color-text-tertiary);
+}
+
+.drum-dialog {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ws-space-xs);
+  padding: var(--ws-space-sm) var(--ws-space-md);
+  background: var(--ws-color-surface);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-lg);
+  font-size: var(--ws-type-caption-size);
+}
+
+/* ---- step grid --------------------------------------------------------------- */
+
+.drum-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-xxs);
+  padding: var(--ws-space-sm) var(--ws-space-md);
+  overflow-x: auto;
+  background: var(--ws-color-surface);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-lg);
+}
+
+.drum-row {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: 112px 28px 64px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ws-space-xs);
+  min-width: 560px;
+}
+
+.drum-track-name {
+  overflow: hidden;
+  color: var(--ws-color-text);
+  font-size: var(--ws-type-caption-size);
+  letter-spacing: var(--ws-type-caption-tracking);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.drum-row[data-muted] .drum-track-name {
+  color: var(--ws-color-text-tertiary);
+}
+
+.drum-mute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ws-radius-sm);
+  background: transparent;
+  color: var(--ws-color-text-tertiary);
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.drum-mute:hover {
+  color: var(--ws-color-text);
+}
+
+.drum-mute[aria-pressed="true"] {
+  background: var(--ws-color-control);
+  color: var(--ws-color-text);
+}
+
+.drum-mute:active {
+  transform: scale(0.95);
+}
+
+.drum-mute svg {
+  width: 18px;
+  height: 18px;
+}
+
+.drum-volume {
+  width: 64px;
+  margin: 0;
+}
+
+.drum-steps {
+  display: flex;
+  gap: var(--ws-space-xs);
+}
+
+.drum-beat {
+  display: flex;
+  flex: 1;
+  gap: var(--ws-control-inset);
+}
+
+.drum-step {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-control);
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.drum-step:active {
+  transform: scale(0.95);
+}
+
+.drum-step[data-playhead] {
+  background: var(--ws-color-chip);
+}
+
+/* Level bar fills from the bottom (Kinetics "Segment Loader": bars fill with
+   scale; here on the shared glide curve). */
+.drum-step-fill {
+  position: absolute;
+  inset: var(--ws-control-inset);
+  border-radius: calc(var(--ws-radius-sm) - var(--ws-control-inset));
+  background: var(--ws-color-accent);
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
+}
+
+.drum-step[data-level="1"] .drum-step-fill {
+  transform: scaleY(0.4);
+}
+
+.drum-step[data-level="2"] .drum-step-fill {
+  transform: scaleY(0.7);
+}
+
+.drum-step[data-level="3"] .drum-step-fill {
+  transform: scaleY(1);
+}
+
+.drum-row[data-muted] .drum-step-fill {
+  background: var(--ws-color-text-tertiary);
+}
+
+.drum-ruler {
+  min-height: 16px;
+}
+
+.drum-tick {
+  flex: 1;
+  min-width: 0;
+  border-bottom: var(--ws-focus-width) solid var(--ws-color-hairline);
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-fine-size);
+  letter-spacing: var(--ws-type-fine-tracking);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--ws-type-caption-leading);
+}
+
+.drum-tick[data-playhead] {
+  border-bottom-color: var(--ws-color-accent);
+  color: var(--ws-color-text);
+}
