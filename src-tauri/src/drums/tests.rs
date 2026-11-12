@@ -571,3 +571,108 @@ fn less_swing_while_playing_plays_a_step_moved_behind_the_edit_point_once() {
         vec![0, 9_000, 18_000, 19_200, 24_000, 30_000, 36_000, 42_000]
     );
 }
+
+#[test]
+fn less_swing_keeps_a_step_that_moved_far_behind_the_edit_point() {
+    // 120 BPM at 48 kHz, eighth swing 75%: step 2 (the "and") sits at 18 000.
+    // Rendering has reached 16 440 and the edit lands at 17 400; straight
+    // time puts step 2 at 12 000, already behind the edit point.
+    let rate = 48_000;
+    let only_step_2: &[(Track, &[usize])] = &[(Track::ClosedHat, &[2])];
+    let mut rig = Rig::new(
+        rate,
+        impulse_kit(rate),
+        pattern(16, 120, 75, SwingUnit::Eighth, only_step_2),
+    );
+    rig.start(0);
+    rig.run(16_440);
+    rig.sequencer
+        .set_pattern(
+            &mut rig.engine.handle,
+            pattern(16, 120, 50, SwingUnit::Eighth, only_step_2),
+            17_400,
+        )
+        .unwrap();
+    rig.run(120_000 - 16_440);
+    // Heard once at the edit point, then on the next bar's straight step 2.
+    let frames: Vec<FramePos> = rig.hits().keys().copied().collect();
+    assert_eq!(frames, vec![17_400, 108_000]);
+}
+
+/// Where each absolute step is heard when the pattern changes from `before`
+/// to `after` at `from` (same tempo, timeline from frame 0): steps still on
+/// their old frames before `from` keep them, every later step follows the new
+/// swing, and one that would now fall before `from` plays at `from`.
+fn heard_frames_after_edit(
+    before: &Pattern,
+    after: &Pattern,
+    rate: u32,
+    from: FramePos,
+    steps: u64,
+) -> BTreeMap<FramePos, u32> {
+    let frames_per_step = before.frames_per_step(rate);
+    let position = from as f64 / frames_per_step;
+    let mut heard = BTreeMap::new();
+    for step in 0..steps {
+        let old = (before.swung_position(step) * frames_per_step).round();
+        let frame = if old < from as f64 {
+            old
+        } else {
+            (from as f64 + (after.swung_position(step) - position) * frames_per_step)
+                .round()
+                .max(from as f64)
+        };
+        *heard.entry(frame as FramePos).or_insert(0) += 1;
+    }
+    heard
+}
+
+#[test]
+fn every_unplayed_step_is_heard_exactly_once_across_swing_edits() {
+    // One full-velocity closed hat per step, so a frame's level counts the
+    // steps heard there.
+    let every_step: Vec<usize> = (0..MAX_STEPS).collect();
+    let hats: &[(Track, &[usize])] = &[(Track::ClosedHat, &every_step)];
+    let unit_level = level_velocity(MAX_LEVEL) * Track::ClosedHat.mix_gain() * TEST_GAIN;
+    for rate in [48_000, 44_100] {
+        let lead = StreamFormat::new(rate, 2).frames_for_secs(0.02);
+        for length in LENGTHS {
+            for unit in [SwingUnit::Eighth, SwingUnit::Sixteenth] {
+                for (old_swing, new_swing) in [(75, 50), (50, 75), (67, 54), (75, 62)] {
+                    let mut before = pattern(length, 97, old_swing, unit, hats);
+                    let mut after = pattern(length, 97, new_swing, unit, hats);
+                    for track in [&mut before, &mut after] {
+                        track.tracks.get_mut(&Track::ClosedHat).unwrap().volume = 1.0;
+                    }
+                    let step = before.frames_per_step(rate);
+                    for k in 0..6 {
+                        let label = format!(
+                            "{rate} Hz, {length} steps, {unit:?} {old_swing}->{new_swing}, edit {k}"
+                        );
+                        let mut rig = Rig::new(rate, impulse_kit(rate), before.clone());
+                        rig.start(0);
+                        rig.run((step * (0.5 + 2.37 * f64::from(k))) as usize);
+                        let from = rig.rendered() + lead;
+                        rig.sequencer
+                            .set_pattern(&mut rig.engine.handle, after.clone(), from)
+                            .unwrap();
+                        rig.run((step * f64::from(length)) as usize);
+                        let end = rig.rendered();
+                        let steps = (end as f64 / step) as u64 + 2;
+                        let want: Vec<(FramePos, u32)> =
+                            heard_frames_after_edit(&before, &after, rate, from, steps)
+                                .into_iter()
+                                .filter(|&(frame, _)| frame < end)
+                                .collect();
+                        let got: Vec<(FramePos, u32)> = rig
+                            .hits()
+                            .into_iter()
+                            .map(|(frame, level)| (frame, (level / unit_level).round() as u32))
+                            .collect();
+                        assert_eq!(got, want, "{label}");
+                    }
+                }
+            }
+        }
+    }
+}
