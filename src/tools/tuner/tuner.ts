@@ -28,6 +28,8 @@ export interface TunerStatus {
   preferredDeviceId: string | null;
   channel: InputChannel;
   referenceHz: number;
+  /** Changes when the input is (re)opened or restarted after a gap. */
+  inputGeneration: number;
 }
 
 export interface Reading {
@@ -56,6 +58,7 @@ export const DEFAULT_STATUS: TunerStatus = {
   preferredDeviceId: null,
   channel: { type: "single", channel: 0 },
   referenceHz: DEFAULT_REFERENCE_HZ,
+  inputGeneration: 0,
 };
 
 /** Starts listening; events arrive on `onEvent` until {@link stopTuner}. */

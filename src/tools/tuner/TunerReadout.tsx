@@ -50,9 +50,15 @@ export function TunerReadout({
     let position = 0;
     let last = performance.now();
     let lastLevel = -1;
+    let epoch = latest.current.epoch;
     const instant = reducedMotion();
     const draw = (now: number) => {
       const { pitch, levelDb } = latest.current;
+      const cleared = latest.current.epoch !== epoch;
+      if (cleared) {
+        epoch = latest.current.epoch;
+        position = 0;
+      }
       const elapsed = Math.min(100, now - last);
       last = now;
       if (pitch) {
@@ -77,7 +83,9 @@ export function TunerReadout({
               cents: Math.round(pitch.cents),
               decihertz: Math.round(pitch.frequency * 10),
             }
-          : { ...current, active: false };
+          : cleared
+            ? { midi: null, active: false, cents: 0, decihertz: 0 }
+            : { ...current, active: false };
         return next.midi === current.midi &&
           next.active === current.active &&
           next.cents === current.cents &&
