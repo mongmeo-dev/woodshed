@@ -3,11 +3,16 @@ import { useTranslation } from "react-i18next";
 import { subscribeAsync } from "../../lib/audio";
 import { inTauri } from "../../lib/ipc";
 import {
+  cancelSeparation,
   formatTime,
   isAudioFile,
+  listSeparations,
   onSeparation,
   pickAudioFile,
   type SeparationEvent,
+  separate,
+  separationFromStems,
+  stemsReady,
 } from "../../lib/stems";
 import { ImportBar } from "./ImportBar";
 import { Mixer } from "./Mixer";
@@ -135,13 +140,46 @@ export function StemSplitterScreen() {
     return subscribeAsync(() =>
       onSeparation((event) => {
         setSeparations((current) => ({ ...current, [event.songId]: event }));
-        if (event.state === "done") {
-          void refreshLibrary();
-          if (event.songId === openId) void open(event.songId, positionNow());
+        if (event.state !== "running") void refreshLibrary();
+        if (event.state === "done" && event.songId === openId) {
+          void open(event.songId, positionNow());
         }
       }),
     );
   }, [refreshLibrary, openId, open, positionNow]);
+
+  // Separations that started before this screen opened; later events win.
+  useEffect(() => {
+    let live = true;
+    void listSeparations()
+      .then((running) => {
+        if (!live) return;
+        setSeparations((current) => {
+          const next = { ...current };
+          for (const event of running) next[event.songId] ??= event;
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const startSeparation = useCallback(async (songId: string) => {
+    setSeparations((current) => ({
+      ...current,
+      [songId]: { songId, state: "running", progress: null },
+    }));
+    try {
+      await separate(songId);
+    } catch {
+      setSeparations((current) => ({
+        ...current,
+        [songId]: { songId, state: "failed", progress: null },
+      }));
+    }
+  }, []);
 
   // Space toggles playback.
   const { togglePlay } = player;
@@ -175,6 +213,13 @@ export function StemSplitterScreen() {
   }, [t, positionNow, duration]);
   useAnimationFrame(player.playing, showTime);
   useEffect(showTime);
+
+  // The list has the latest manifest (refreshed on every finished separation).
+  const openSong = library.songs.find((song) => song.id === openId) ?? opened?.song ?? null;
+  const separation = openId
+    ? (separations[openId] ?? (openSong ? separationFromStems(openSong) : null))
+    : null;
+  const separating = separation?.state === "running";
 
   const speedPercent = Math.round(player.speed * 100);
   const loop = player.loop;
@@ -298,7 +343,19 @@ export function StemSplitterScreen() {
                       <h2 className="stems-section-title" id="stems-mixer">
                         {t("stems.mixer.title")}
                       </h2>
-                      <SeparationSlot separation={separations[opened.song.id] ?? null} />
+                      <SeparationSlot
+                        separation={separation}
+                        onSeparate={
+                          separating ||
+                          separation?.state === "done" ||
+                          stemsReady(openSong ?? opened.song)
+                            ? undefined
+                            : () => void startSeparation(opened.song.id)
+                        }
+                        onCancel={
+                          separating ? () => void cancelSeparation(opened.song.id) : undefined
+                        }
+                      />
                     </div>
                     <Mixer
                       tracks={opened.tracks}

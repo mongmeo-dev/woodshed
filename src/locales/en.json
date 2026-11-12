@@ -322,7 +322,9 @@
     "separation": {
       "start": "Separate Stems",
       "running": "Separating {{percent}}%",
-      "failed": "Couldn't separate stems"
+      "preparing": "Preparing",
+      "failed": "Couldn't separate stems",
+      "cancel": "Cancel"
     },
     "errors": {
       "invalidLink": "Not a YouTube video link",
