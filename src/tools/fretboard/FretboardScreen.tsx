@@ -27,9 +27,9 @@ function keyLabel(pitchClass: number): string {
   return displayName(sharp === flat ? sharp : `${sharp} / ${flat}`);
 }
 
-/** Thicker strings toward the bass; `index` counts from the top row. */
-function stringWidth(index: number, count: number): string {
-  const rank = count === 1 ? 0 : (count - 1 - index) / (count - 1);
+/** Thicker strings toward the bass; `row` counts from the top (highest) string. */
+function stringWidth(row: number, count: number): string {
+  const rank = count === 1 ? 0 : row / (count - 1);
   return `${1 + Math.round(rank * 2)}px`;
 }
 
