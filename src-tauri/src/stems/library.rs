@@ -17,6 +17,8 @@ use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -186,10 +188,19 @@ pub struct Library {
 }
 
 /// Writes `bytes` to `path` through a temp file and a rename.
+/// Serialises every manifest read-modify-write in this process.
+static MANIFEST_LOCK: Mutex<()> = Mutex::new(());
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Writes `bytes` to `path` through a uniquely named temp file and a rename.
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temp = path.with_extension("tmp");
-    fs::write(&temp, bytes)?;
-    fs::rename(&temp, path)
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = path.with_extension(format!("{}-{unique}.tmp", std::process::id()));
+    if let Err(error) = fs::write(&temp, bytes).and_then(|()| fs::rename(&temp, path)) {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn now_ms() -> u64 {
@@ -296,17 +307,28 @@ impl Library {
         self.read_manifest(&self.song_dir(id)?)
     }
 
-    /// Saves a changed manifest (stem-engine updates `stems` this way).
-    pub fn save(&self, manifest: &Manifest) -> Result<(), LibraryError> {
-        let dir = self.song_dir(&manifest.id)?;
-        if !dir.is_dir() {
-            return Err(LibraryError::NotFound);
-        }
+    /// Changes a song's manifest: reads the current file, applies `change`
+    /// and writes it back, all under one process-wide lock, so concurrent
+    /// updates (stem-engine progress, the screen) never lose each other's
+    /// changes. Returns the saved manifest. This is the only way to modify
+    /// a manifest after import. The id is kept as it was.
+    pub fn update(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Manifest),
+    ) -> Result<Manifest, LibraryError> {
+        let _guard = MANIFEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = self.song_dir(id)?;
+        let mut manifest = self.read_manifest(&dir)?;
+        change(&mut manifest);
+        manifest.id = id.to_owned();
         write_atomic(
             &dir.join(MANIFEST_FILE),
-            &serde_json::to_vec_pretty(manifest)?,
+            &serde_json::to_vec_pretty(&manifest)?,
         )?;
-        Ok(())
+        Ok(manifest)
     }
 
     pub fn waveform(&self, id: &str) -> Result<Vec<u8>, LibraryError> {
@@ -413,19 +435,22 @@ mod tests {
     #[test]
     fn manifest_round_trips_stems_and_sources() {
         let (dir, library) = temp_library("stems");
-        let mut song = import(&library, 5);
-        song.source = SongSource::Youtube {
-            url: "https://youtu.be/abc".into(),
-            video_id: "abc".into(),
-        };
-        song.stems = StemName::ALL
-            .iter()
-            .map(|&name| StemEntry {
-                name,
-                status: StemStatus::Running,
+        let song = import(&library, 5);
+        let song = library
+            .update(&song.id, |song| {
+                song.source = SongSource::Youtube {
+                    url: "https://youtu.be/abc".into(),
+                    video_id: "abc".into(),
+                };
+                song.stems = StemName::ALL
+                    .iter()
+                    .map(|&name| StemEntry {
+                        name,
+                        status: StemStatus::Running,
+                    })
+                    .collect();
             })
-            .collect();
-        library.save(&song).unwrap();
+            .unwrap();
         assert_eq!(library.get(&song.id).unwrap(), song);
         let text =
             fs::read_to_string(dir.join(SONGS_DIR).join(&song.id).join(MANIFEST_FILE)).unwrap();
@@ -463,6 +488,44 @@ mod tests {
             tracks[5],
             (TrackName::Other, PathBuf::from("stems/other.wav"))
         );
+    }
+
+    #[test]
+    fn concurrent_updates_keep_every_change() {
+        let (dir, library) = temp_library("concurrent");
+        let song = import(&library, 1);
+        std::thread::scope(|scope| {
+            for (index, &name) in StemName::ALL.iter().enumerate() {
+                let library = library.clone();
+                let id = song.id.clone();
+                scope.spawn(move || {
+                    for _ in 0..=index {
+                        library
+                            .update(&id, |song| {
+                                song.stems.retain(|stem| stem.name != name);
+                                song.stems.push(StemEntry {
+                                    name,
+                                    status: StemStatus::Ready,
+                                });
+                            })
+                            .unwrap();
+                    }
+                });
+            }
+        });
+        let stems = library.get(&song.id).unwrap().stems;
+        assert_eq!(stems.len(), 6, "{stems:?}");
+        let leftovers = fs::read_dir(library.song_dir(&song.id).unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        assert!(matches!(
+            library.update("missing1", |_| {}),
+            Err(LibraryError::NotFound)
+        ));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
