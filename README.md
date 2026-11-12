@@ -64,6 +64,17 @@ cd src-tauri && mise exec -- cargo run --release --example latency_probe
 - **화면 동기**: 박을 예약하는 순간(약 250ms 앞) 들리는 시각을 계산해 화면에 보내고, 화면은 그 시각이 지난 첫 프레임에 박을 켭니다.
 - **저장**: 마지막 설정과 프리셋은 앱 데이터 디렉터리의 `metronome.json`에 둡니다. 같은 이름으로 저장하면 덮어씁니다. 다른 화면으로 가도 재생은 이어집니다.
 
+## 드럼 머신
+
+- 엔진: `src-tauri/src/drums/`(샘플 보이스·스텝 시퀀서·Tauri 명령), 화면: `src/tools/drumMachine/`.
+- 편집 중인 패턴과 저장한 패턴은 앱 데이터 디렉터리(`~/Library/Application Support/dev.mongmeo.woodshed/`)의 `drum-machine.json`에 둡니다. `settings.json`과 따로 저장합니다.
+- 스케줄러 스레드가 120ms 앞까지 스텝을 샘플 단위로 예약합니다. 재생 중 편집·템포·스윙·길이 변경과 출력 장치 변경(세대 증가)은 20ms 앞부터 취소 후 다시 예약하므로 재생이 멈추지 않습니다.
+- 화면의 현재 스텝은 스텝을 예약할 때 계산한 들리는 시각(`heardAtMs`)을 전용 채널(`drums_subscribe`)로 미리 받아 그 시각에 표시합니다.
+
+## 드럼 샘플
+
+드럼 머신의 샘플 10개(`src-tauri/resources/drums/`)는 [Versilian Community Sample Library](https://github.com/sgossner/VCSL)(커밋 `c1ea7bc`)에서 가져왔고, 모두 **CC0 1.0**(퍼블릭 도메인)입니다. 파일별 원본 경로와 가공 내용은 [`LICENSES/drum-samples.md`](LICENSES/drum-samples.md), 라이선스 원문은 [`LICENSES/CC0-1.0.txt`](LICENSES/CC0-1.0.txt)에 있습니다.
+
 ## 미결 사항
 
 - 마이크 권한 문구(`src-tauri/Info.plist`)는 영어 한 가지입니다. 현지화는 튜너 작업에서 정합니다.
