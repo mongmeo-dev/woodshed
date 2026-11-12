@@ -1190,6 +1190,54 @@ fn coreml_model_separates_a_short_song_into_six_stems() {
         path.display(),
         levels.join(", ")
     ));
+    // Fidelity sample by sample: the float output (before 16-bit files)
+    // against PyTorch on the same audio.wav, over a fixed excerpt across the
+    // first chunk overlap.
+    let input = read_song(&dir.join(AUDIO_FILE), &AtomicBool::new(false)).unwrap();
+    let mut float = Collect::new();
+    work.separate(
+        &input.left,
+        &input.right,
+        &stft,
+        model.as_mut(),
+        &AtomicBool::new(false),
+        &mut float,
+    )
+    .unwrap();
+    let reference = pytorch_excerpt();
+    let n = REFERENCE_FRAMES;
+    let span = REFERENCE_START..REFERENCE_START + n;
+    let mix_energy = energy(&input.left[span.clone()]) + energy(&input.right[span.clone()]);
+    let mut fidelity = Vec::new();
+    for (source, name) in MODEL_STEMS.iter().enumerate() {
+        let (mut signal, mut error, mut max) = (0.0_f64, 0.0_f64, 0.0_f32);
+        for c in 0..2 {
+            let plane = source * 2 + c;
+            let ours = &float.planes[plane][span.clone()];
+            for (&r, &e) in reference[plane * n..(plane + 1) * n].iter().zip(ours) {
+                signal += f64::from(r).powi(2);
+                error += f64::from(r - e).powi(2);
+                max = max.max((r - e).abs());
+            }
+        }
+        let snr = 10.0 * (signal / error.max(1e-30)).log10();
+        let below_mix = 10.0 * (mix_energy / error.max(1e-30)).log10();
+        fidelity.push(format!(
+            "{} {snr:.1} dB (error {below_mix:.1} dB below the mix, max {max:.1e})",
+            name.as_str()
+        ));
+        assert!(max <= 1e-3, "{name:?} max error {max:e} against PyTorch");
+        assert!(
+            snr >= 60.0 || below_mix >= 100.0,
+            "{name:?} SNR {snr:.1} dB, {below_mix:.1} dB below the mix"
+        );
+    }
+    report(&format!(
+        "coreml vs PyTorch, frames {REFERENCE_START}..{}: {}",
+        REFERENCE_START + n,
+        fidelity.join(", ")
+    ));
+
     if let Some(out) = std::env::var_os("WOODSHED_STEM_TEST_OUT") {
         // For comparing with PyTorch (tools/stem-model/ref_torch.py, compare.py).
         let out = PathBuf::from(out);
@@ -1217,7 +1265,23 @@ fn coreml_model_separates_a_short_song_into_six_stems() {
     }
 }
 
+/// PyTorch stems of [`band`] after import (16-bit `audio.wav`), frames
+/// `REFERENCE_START..+REFERENCE_FRAMES`, `[6][2][n]` little-endian f32 in
+/// model order (`tools/stem-model/make_reference_excerpt.py`).
+const REFERENCE_START: usize = 250_000;
+const REFERENCE_FRAMES: usize = 16_000;
+
+fn pytorch_excerpt() -> Vec<f32> {
+    let bytes = include_bytes!("testdata/band_pytorch_excerpt.f32");
+    assert_eq!(bytes.len(), SOURCES * 2 * REFERENCE_FRAMES * 4);
+    bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
+}
+
 /// PyTorch reference for [`band`] after import (16-bit `audio.wav`): six
-/// stems sum to the mix at this SNR, and stem levels in model order.
+/// stems sum to the mix at this SNR (Demucs does not keep the sum equal to
+/// the mix; this residual is PyTorch's own), and stem levels in model order.
 const PYTORCH_SUM_SNR_DB: f64 = 16.92;
 const PYTORCH_RMS_DBFS: [f64; SOURCES] = [-24.72, -23.42, -61.91, -33.29, -26.14, -44.74];
