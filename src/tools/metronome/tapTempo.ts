@@ -1,7 +1,10 @@
 import { roundBpm } from "./model";
 
-/** A pause longer than this starts a new tap sequence. */
-export const TAP_RESET_MS = 2000;
+/**
+ * A pause longer than this starts a new tap sequence: the 20 BPM floor is
+ * 3 s between taps, plus room for uneven tapping.
+ */
+export const TAP_RESET_MS = 3500;
 /** Taps averaged at most. */
 export const TAP_WINDOW = 6;
 /** An interval this far (as a ratio) from the running average starts over. */
