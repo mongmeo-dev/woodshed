@@ -132,6 +132,35 @@ test("speed slider sets 50–100 % and shows the value", async () => {
   expect(screen.getByText("75%")).toBeTruthy();
 });
 
+test("dragging on the waveform sets the A-B loop, a click seeks", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 1000,
+    bottom: 88,
+    width: 1000,
+    height: 88,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  await renderOpened();
+  const wave = screen.getByRole("slider", { name: "Playback Position" });
+  fireEvent.pointerDown(wave, { button: 0, clientX: 100, pointerId: 1 });
+  fireEvent.pointerMove(wave, { clientX: 300, pointerId: 1 });
+  fireEvent.pointerUp(wave, { clientX: 300, pointerId: 1 });
+  expect(called("stems_set_loop").at(-1)).toEqual({ range: { start: 18, end: 54 } });
+  expect(screen.getByText("Loop 0:18–0:54")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear Loop" }));
+  expect(called("stems_set_loop").at(-1)).toEqual({ range: null });
+  expect(screen.queryByText("Loop 0:18–0:54")).toBeNull();
+
+  fireEvent.pointerDown(wave, { button: 0, clientX: 500, pointerId: 1 });
+  fireEvent.pointerUp(wave, { clientX: 500, pointerId: 1 });
+  await waitFor(() => expect(called("stems_seek").at(-1)).toEqual({ seconds: 90 }));
+});
+
 test("waveform keys seek and a loop can be cleared", async () => {
   await renderOpened();
   const position = screen.getByRole("slider", { name: "Playback Position" });
