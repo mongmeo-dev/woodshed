@@ -3,9 +3,22 @@ use std::path::Path;
 /// Sidecars listed in `tauri.conf.json` → `bundle.externalBin`.
 const SIDECARS: &[&str] = &["yt-dlp", "ffmpeg"];
 
+/// The compiled stem model listed in `tauri.conf.json` → `bundle.resources`.
+const STEM_MODEL: &str = "models/htdemucs_6s_fp32.mlmodelc";
+
 fn main() {
     ensure_sidecar_placeholders();
+    ensure_stem_model_placeholder();
     tauri_build::build()
+}
+
+/// tauri-build refuses a missing resource path but skips an empty directory.
+/// `tools/stem-model/build.sh` (`mise run stem-model`) puts the real model in
+/// place, and release builds run it first (`beforeBuildCommand`). Checks,
+/// tests and dev builds get an empty directory instead; the app then looks
+/// for the model in its cache directory and otherwise reports it missing.
+fn ensure_stem_model_placeholder() {
+    std::fs::create_dir_all(STEM_MODEL).expect("create the stem model directory");
 }
 
 /// tauri-build refuses to build while a sidecar file is missing.

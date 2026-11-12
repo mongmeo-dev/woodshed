@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "test": "vitest run --maxWorkers=2",
     "lint": "biome check .",
-    "binaries": "sh scripts/fetch-binaries.sh"
+    "binaries": "sh scripts/fetch-binaries.sh",
+    "stem-model": "sh tools/stem-model/build.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

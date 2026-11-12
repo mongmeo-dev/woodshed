@@ -43,6 +43,22 @@ mise run binaries   # = pnpm binaries = sh scripts/fetch-binaries.sh
 - `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 바이너리가 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 파일을 만들고, 앱은 YouTube 가져오기에서 도구를 찾을 수 없다는 오류만 보입니다. 실제로 내려받아 보려면 먼저 `mise run binaries`를 실행합니다.
 - 라이선스 고지(FFmpeg LGPL v2.1+ 전문과 소스 위치, yt-dlp)는 [`LICENSES/`](LICENSES/README.md)에 있고 앱 번들에 함께 들어갑니다.
 
+### 스템 분리 모델 (Demucs htdemucs_6s → Core ML)
+
+스템 분리는 Demucs v4 `htdemucs_6s`(6스템: drums, bass, other, vocals, guitar, piano)를 Core ML로 바꿔 앱 안에서 돌립니다. 가중치와 변환한 모델은 git에 넣지 않고 스크립트로 만듭니다.
+
+```sh
+mise run stem-model   # = pnpm stem-model = sh tools/stem-model/build.sh
+# → src-tauri/models/htdemucs_6s_fp32.mlmodelc (115MB)
+```
+
+- 가중치: Hugging Face [`adefossez/HTDemucs-6s`](https://huggingface.co/adefossez/HTDemucs-6s)의 고정 리비전 `3c5ee475be62`에서 `5c90dfd2.safetensors`를 받아 SHA-256(`d2a1745f…d411`)을 확인합니다. Demucs 코드는 MIT(Meta Platforms)이고, 가중치에는 별도 라이선스 표기가 없습니다(모델 카드에 license 필드 없음). 고지는 [`LICENSES/`](LICENSES/README.md)에 있습니다.
+- 변환: `tools/stem-model/`의 `core.py`(STFT/iSTFT를 뺀 핵심부)를 `convert.py`가 fp32 mlprogram으로 바꾸고 `xcrun coremlcompiler`로 컴파일합니다. Python은 mise로 고정한 uv 0.10.7이 만든 Python 3.12.8 가상환경에서 `requirements.lock.txt`(torch 2.7.0, coremltools 9.0, demucs 4.1.0 등 전부 고정)로 돌립니다. 처음 한 번 1분 안팎 걸립니다(가중치 52MB 다운로드, 변환 약 5초).
+- 결과와 가중치는 `~/Library/Caches/dev.mongmeo.woodshed/models`에 캐시되어 다음부터는 복사만 합니다. 스크립트·잠금 파일·가중치가 바뀌면 다시 변환합니다. 변환한 모델은 연구 단계 모델과 `model.mil`·가중치가 바이트 단위로 같습니다.
+- `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 모델이 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 디렉터리를 만들고, 모델이 필요한 테스트는 건너뛴 사실을 출력합니다. dev 앱은 캐시에 모델이 있으면 그것을 씁니다.
+- 앱 밖 DSP(STFT/iSTFT, 7.8초 청크, 삼각 가중치 오버랩-애드, 입력 정규화)는 Rust(`src-tauri/src/separation/`)에 있고, 기준 사양은 `tools/stem-model/dsp.py`(numpy)입니다. Rust 테스트는 `make_dsp_fixture.py`가 만든 고정 입력 기준값(`src-tauri/src/separation/testdata/dsp_reference.json`)과 비교합니다. `dsp.py`나 입력식을 바꾸면 이 파일을 다시 만듭니다.
+- 모델이나 변환을 바꾸면 PyTorch 원본과 비교합니다: `make_audio.py`로 시험 음원을 만들고, `ref_torch.py`로 기준을 만든 뒤 앱 출력과 `compare.py`로 비교합니다.
+
 ## 검사
 
 ```sh

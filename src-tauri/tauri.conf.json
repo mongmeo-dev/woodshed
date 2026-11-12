@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm binaries && pnpm build",
+    "beforeBuildCommand": "pnpm binaries && pnpm stem-model && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -33,7 +33,10 @@
     "targets": ["app"],
     "category": "Music",
     "externalBin": ["binaries/yt-dlp", "binaries/ffmpeg"],
-    "resources": { "../LICENSES/": "LICENSES/" },
+    "resources": {
+      "../LICENSES/": "LICENSES/",
+      "models/htdemucs_6s_fp32.mlmodelc/": "models/htdemucs_6s_fp32.mlmodelc/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
