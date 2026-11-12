@@ -16,6 +16,8 @@
   --ws-type-title-size: 34px;
   --ws-type-title-weight: 600;
   --ws-type-title-tracking: -0.374px;
+  /* display-lg leading (1.1) for single-line screen titles */
+  --ws-type-title-leading: 1.1;
   /* tagline: 21 / 600 / 1.19 / 0.231px */
   --ws-type-section-size: 21px;
   --ws-type-section-weight: 600;
@@ -54,6 +56,11 @@
   --ws-ease-glide: cubic-bezier(0.65, 0, 0.35, 1);
   --ws-duration-glide: 240ms;
   --ws-duration-fast: 150ms;
+  --ws-duration-pulse: 600ms;
+
+  /* Focus ring and the inset of compact controls */
+  --ws-focus-width: 2px;
+  --ws-control-inset: 2px;
 
   /* Layout */
   --ws-sidebar-width: 224px;
@@ -120,5 +127,6 @@
   :root {
     --ws-duration-glide: 0ms;
     --ws-duration-fast: 0ms;
+    --ws-duration-pulse: 0ms;
   }
 }

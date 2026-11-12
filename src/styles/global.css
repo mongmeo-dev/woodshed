@@ -38,8 +38,8 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--ws-color-accent-focus);
-  outline-offset: 2px;
+  outline: var(--ws-focus-width) solid var(--ws-color-accent-focus);
+  outline-offset: var(--ws-focus-width);
 }
 
 /* ---- shell ---------------------------------------------------------------- */
@@ -165,7 +165,7 @@ button {
   font-family: var(--ws-font-display);
   font-size: var(--ws-type-title-size);
   font-weight: var(--ws-type-title-weight);
-  line-height: 1.1;
+  line-height: var(--ws-type-title-leading);
   letter-spacing: var(--ws-type-title-tracking);
 }
 
@@ -247,7 +247,7 @@ button {
   background: var(--ws-color-accent);
   color: var(--ws-color-on-accent);
   font-size: var(--ws-type-caption-size);
-  transition: transform var(--ws-duration-fast) ease;
+  transition: transform var(--ws-duration-fast) var(--ws-ease-glide);
 }
 
 .button-primary:active {
@@ -279,7 +279,7 @@ button {
   inset: 0;
   border-radius: inherit;
   background: var(--ws-color-accent);
-  animation: beat-ring 600ms ease-out forwards;
+  animation: beat-ring var(--ws-duration-pulse) var(--ws-ease-glide) forwards;
 }
 
 @keyframes beat-ring {
@@ -319,14 +319,14 @@ button {
   margin: 0;
   border: 0;
   min-inline-size: 0;
-  gap: 2px;
-  padding: 2px;
+  gap: var(--ws-control-inset);
+  padding: var(--ws-control-inset);
   background: var(--ws-color-control);
   border-radius: var(--ws-radius-sm);
 }
 
 .segmented-indicator {
-  border-radius: var(--ws-radius-xs);
+  border-radius: var(--ws-radius-sm);
   border: 1px solid var(--ws-color-hairline);
 }
 
@@ -339,7 +339,7 @@ button {
   min-height: 28px;
   padding: 0 var(--ws-space-sm);
   border: 0;
-  border-radius: var(--ws-radius-xs);
+  border-radius: var(--ws-radius-sm);
   background: transparent;
   color: var(--ws-color-text-secondary);
   font-size: var(--ws-type-caption-size);
@@ -347,8 +347,8 @@ button {
 }
 
 .segmented-option:has(:focus-visible) {
-  outline: 2px solid var(--ws-color-accent-focus);
-  outline-offset: 1px;
+  outline: var(--ws-focus-width) solid var(--ws-color-accent-focus);
+  outline-offset: calc(var(--ws-control-inset) / 2);
 }
 
 .segmented-option:has(:checked) {
