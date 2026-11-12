@@ -74,7 +74,8 @@ impl Block {
         let pos = self.pos + frames as f64 * self.step;
         match self.looping {
             Some(range) if self.pos < range.end as f64 && pos >= range.end as f64 => {
-                pos - range.len() as f64
+                let start = range.start as f64;
+                start + (pos - start).rem_euclid(range.len() as f64)
             }
             _ => pos,
         }
@@ -409,5 +410,22 @@ impl Feeder {
                 filled += want;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_wraps_loops_shorter_than_a_block() {
+        let mut block = Block::new(2);
+        block.pos = 90.0;
+        block.step = 1.0;
+        block.looping = LoopRange::new(0, 100);
+        // 256 frames over a 100-frame loop: 90 + 256 = 346 → 46.
+        assert_eq!(block.position_at(BLOCK_FRAMES), 46.0);
+        block.pos = 150.0;
+        assert_eq!(block.position_at(10), 160.0, "past the loop it plays on");
     }
 }

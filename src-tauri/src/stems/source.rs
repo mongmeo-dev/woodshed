@@ -11,7 +11,7 @@ use rtrb::{Consumer, Producer};
 use crate::audio::{EventKind, Source, StreamFormat};
 
 use super::feeder::{Block, FeederRequest, MAX_TRACKS, MIN_SPEED, is_bypass};
-use super::reader::LoopRange;
+use super::reader::{LoopRange, MIN_LOOP_FRAMES};
 
 /// Ids of [`EventKind::Param`] events understood by [`StemSource`].
 pub mod param {
@@ -52,7 +52,8 @@ pub mod param {
 }
 
 /// Events that set (or clear, with `None`) the A-B loop. Schedule them in
-/// order on the same frame.
+/// order on the same frame. Loops shorter than [`MIN_LOOP_FRAMES`] are
+/// ignored by the player (no loop).
 pub fn loop_events(range: Option<LoopRange>) -> Vec<EventKind> {
     let param = |id, value: u64| EventKind::Param {
         id,
@@ -266,6 +267,7 @@ impl StemSource {
                         (start_hi << 16) | start_lo,
                         ((end_hi << 16) | end_lo).min(self.song_frames),
                     )
+                    .filter(|range| range.len() >= MIN_LOOP_FRAMES)
                 } else {
                     None
                 };

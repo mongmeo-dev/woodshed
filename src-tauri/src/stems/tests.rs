@@ -371,3 +371,32 @@ fn mismatched_track_rates_are_rejected() {
         Some(PlayerError::MixedRates)
     );
 }
+
+#[test]
+fn loops_shorter_than_the_minimum_are_ignored() {
+    let ramp: Vec<f32> = (0..20_000).map(|i| i as f32 * 1e-6).collect();
+    let mut rig = Rig::new(vec![Box::new(MemoryTrack::mono(RATE, &ramp))], RATE);
+    for event in loop_events(LoopRange::new(1_000, 1_000 + MIN_LOOP_FRAMES - 1)) {
+        rig.at(0, event);
+    }
+    rig.at(0, EventKind::Start);
+    rig.render_to_end(40_000);
+    assert!(rig.shared.ended(), "plays through instead of looping");
+}
+
+#[test]
+fn shortest_loop_keeps_the_position_inside_it() {
+    let ramp: Vec<f32> = (0..20_000).map(|i| i as f32 * 1e-6).collect();
+    let mut rig = Rig::new(vec![Box::new(MemoryTrack::mono(RATE, &ramp))], RATE);
+    let range = LoopRange::new(5_000, 5_000 + MIN_LOOP_FRAMES).unwrap();
+    for event in loop_events(Some(range)) {
+        rig.at(0, event);
+    }
+    rig.at(0, EventKind::Start);
+    for _ in 0..40 {
+        rig.render(CALLBACK * 3);
+        let position = rig.shared.position();
+        assert!(position < range.end as f64, "{position}");
+    }
+    assert!(rig.shared.position() >= range.start as f64);
+}
