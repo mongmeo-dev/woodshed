@@ -37,12 +37,21 @@ const backend = vi.hoisted(() => {
     stems: [] as StemEntry[],
     separations: [] as SeparationEvent[],
     separation: null as null | ((event: SeparationEvent) => void),
+    /** When true, the listener is attached only on `attach()`, like a slow subscribe. */
+    deferSubscribe: false,
+    attach: null as null | (() => void),
+    /** Lists a second song ("Second Song", never separated). */
+    secondSong: false,
     reset() {
       state.run += 1;
       state.calls = [];
       state.tracks = ["original"];
       state.stems = [];
       state.separations = [];
+      state.separation = null;
+      state.deferSubscribe = false;
+      state.attach = null;
+      state.secondSong = false;
       state.manual = false;
       state.frame = 0;
       state.lastFrame = 0;
@@ -94,13 +103,23 @@ vi.mock("../../lib/ipc", () => ({
       addedAtMs: 1,
       stems: backend.stems.map((stem) => ({ ...stem })),
     };
+    const second: SongSummary = {
+      ...song,
+      id: "song2",
+      title: "Second Song",
+      addedAtMs: 0,
+      stems: [],
+    };
     const applied = backend.applied;
     switch (command) {
       case "stems_list":
-        return [song];
-      case "stems_open":
-        applied.mix = backend.tracks.map(() => ({ volume: 1, muted: false, solo: false }));
-        return { song, tracks: backend.tracks, waveform: [10, 200, 30] } as OpenedSong;
+        return backend.secondSong ? [song, second] : [song];
+      case "stems_open": {
+        const [opened, tracks] =
+          args.id === "song2" ? [second, ["original"]] : [song, backend.tracks];
+        applied.mix = tracks.map(() => ({ volume: 1, muted: false, solo: false }));
+        return { song: opened, tracks, waveform: [10, 200, 30] } as OpenedSong;
+      }
       case "stems_transport":
         return {
           songId: song.id,
@@ -169,12 +188,18 @@ vi.mock("../../lib/ipc", () => ({
 
 vi.mock("../../lib/stems", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/stems")>()),
-  onSeparation: async (listener: (event: SeparationEvent) => void) => {
-    backend.separation = listener;
-    return () => {
-      backend.separation = null;
-    };
-  },
+  // Subscribing takes a turn of the event loop, like Tauri's `listen`.
+  onSeparation: (listener: (event: SeparationEvent) => void) =>
+    new Promise<() => void>((resolve) => {
+      const attach = () => {
+        backend.separation = listener;
+        resolve(() => {
+          if (backend.separation === listener) backend.separation = null;
+        });
+      };
+      if (backend.deferSubscribe) backend.attach = attach;
+      else setTimeout(attach, 0);
+    }),
 }));
 
 vi.mock("../../lib/audio", async (importOriginal) => ({
@@ -221,8 +246,9 @@ test("the newest song opens with one original track and a separate button", asyn
 
 const SIX_STEMS = ["vocals", "drums", "bass", "guitar", "piano", "other"] as const;
 
-function emitSeparation(event: Omit<SeparationEvent, "songId">) {
-  act(() => backend.separation?.({ songId: "song1", ...event }));
+async function emitSeparation(event: Omit<SeparationEvent, "songId">, songId = "song1") {
+  await waitFor(() => expect(backend.separation).not.toBeNull());
+  act(() => backend.separation?.({ songId, ...event }));
 }
 
 test("separating shows progress and can be cancelled", async () => {
@@ -232,14 +258,14 @@ test("separating shows progress and can be cancelled", async () => {
   expect(await screen.findByRole("progressbar", { name: "Preparing" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
 
-  emitSeparation({ state: "running", progress: 0.5 });
+  await emitSeparation({ state: "running", progress: 0.5 });
   const bar = await screen.findByRole("progressbar", { name: "Separating 50%" });
   expect(bar.getAttribute("aria-valuenow")).toBe("50");
   expect(screen.getByText("Separating 50%")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(called("stems_cancel_separation")).toEqual([{ songId: "song1" }]));
-  emitSeparation({ state: "cancelled", progress: null });
+  await emitSeparation({ state: "cancelled", progress: null });
   expect(await screen.findByRole("button", { name: "Separate Stems" })).toBeTruthy();
   expect(screen.queryByRole("progressbar")).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
@@ -248,10 +274,10 @@ test("separating shows progress and can be cancelled", async () => {
 test("a finished separation reopens the song with its six stems", async () => {
   await renderOpened();
   fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
-  emitSeparation({ state: "running", progress: 1 });
+  await emitSeparation({ state: "running", progress: 1 });
   backend.tracks = [...SIX_STEMS];
   backend.stems = SIX_STEMS.map((name) => ({ name, status: "ready" }));
-  emitSeparation({ state: "done", progress: 1 });
+  await emitSeparation({ state: "done", progress: 1 });
   await waitFor(() => expect(called("stems_open")).toHaveLength(2));
   for (const name of ["Vocals", "Drums", "Bass", "Guitar", "Piano", "Other"]) {
     expect(await screen.findByRole("slider", { name: `${name} Volume` })).toBeTruthy();
@@ -264,7 +290,7 @@ test("a finished separation reopens the song with its six stems", async () => {
 test("a failed separation shows a short error and the button again", async () => {
   await renderOpened();
   fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
-  emitSeparation({ state: "failed", progress: null });
+  await emitSeparation({ state: "failed", progress: null });
   expect((await screen.findByRole("alert")).textContent).toBe("Couldn't separate stems");
   expect(screen.getByRole("button", { name: "Separate Stems" })).toBeTruthy();
 });
@@ -275,6 +301,98 @@ test("a separation that started earlier shows its progress when the screen opens
   expect(await screen.findByRole("progressbar", { name: "Separating 30%" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+});
+
+/** Review R2: the separation ends after the screen asked for state but before its listener is in place. */
+test("a separation that finished while the screen was subscribing shows its stems, not a stale running", async () => {
+  backend.deferSubscribe = true;
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "running" }));
+  backend.separations = [{ songId: "song1", state: "running", progress: 0.3 }];
+  await renderOpened();
+  expect(await screen.findByRole("progressbar", { name: "Preparing" })).toBeTruthy();
+  expect(called("stems_separations")).toHaveLength(0);
+
+  // It finishes; the done event goes to nobody.
+  backend.separations = [];
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "ready" }));
+  backend.tracks = [...SIX_STEMS];
+  act(() => backend.attach?.());
+
+  for (const name of ["Vocals", "Drums", "Bass", "Guitar", "Piano", "Other"]) {
+    expect(await screen.findByRole("slider", { name: `${name} Volume` })).toBeTruthy();
+  }
+  expect(called("stems_separations")).toHaveLength(1);
+  expect(called("stems_open")).toEqual([{ id: "song1" }, { id: "song1" }]);
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+});
+
+test("a separation cancelled while the screen was subscribing brings the button back", async () => {
+  backend.deferSubscribe = true;
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "running" }));
+  backend.separations = [{ songId: "song1", state: "running", progress: 0.3 }];
+  await renderOpened();
+  expect(await screen.findByRole("progressbar", { name: "Preparing" })).toBeTruthy();
+  backend.separations = [];
+  backend.stems = [];
+  act(() => backend.attach?.());
+  expect(await screen.findByRole("button", { name: "Separate Stems" })).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a separation that failed while the screen was subscribing shows the error and the button", async () => {
+  backend.deferSubscribe = true;
+  backend.separations = [{ songId: "song1", state: "running", progress: 0.3 }];
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "running" }));
+  await renderOpened();
+  backend.separations = [];
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "failed" }));
+  act(() => backend.attach?.());
+  expect((await screen.findByRole("alert")).textContent).toBe("Couldn't separate stems");
+  expect(screen.getByRole("button", { name: "Separate Stems" })).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
+test("a separation that ends while another song is open shows when switching back", async () => {
+  backend.secondSong = true;
+  await renderOpened();
+  fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
+  await emitSeparation({ state: "running", progress: 0.5 });
+  expect(await screen.findByRole("progressbar", { name: "Separating 50%" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Second Song/ }));
+  expect(await screen.findByRole("heading", { name: "Second Song" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Separate Stems" })).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "ready" }));
+  backend.tracks = [...SIX_STEMS];
+  await emitSeparation({ state: "done", progress: 1 });
+  await waitFor(() => expect(called("stems_list").length).toBeGreaterThan(2));
+  expect(screen.getByRole("heading", { name: "Second Song" })).toBeTruthy();
+  expect(called("stems_open")).toEqual([{ id: "song1" }, { id: "song2" }]);
+  expect(screen.getByRole("slider", { name: "Original Volume" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Practice Song/ }));
+  expect(await screen.findByRole("slider", { name: "Vocals Volume" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
+test("a separation that fails while another song is open shows the error when switching back", async () => {
+  backend.secondSong = true;
+  await renderOpened();
+  fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Second Song/ }));
+  expect(await screen.findByRole("heading", { name: "Second Song" })).toBeTruthy();
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "failed" }));
+  await emitSeparation({ state: "failed", progress: null });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Practice Song/ }));
+  expect(await screen.findByRole("heading", { name: "Practice Song" })).toBeTruthy();
+  expect((await screen.findByRole("alert")).textContent).toBe("Couldn't separate stems");
+  expect(screen.getByRole("button", { name: "Separate Stems" })).toBeTruthy();
 });
 
 test("a song the manifest shows waiting is in progress before any event", async () => {
