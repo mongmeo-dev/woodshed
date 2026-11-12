@@ -160,3 +160,18 @@ test("presets save, replace, load and delete after confirming", async () => {
   expect(screen.getByRole("status").textContent).toBe("Deleted “Fast”");
   expect(screen.getByText("No Presets")).toBeTruthy();
 });
+
+test("subdivision labels follow the beat unit", async () => {
+  await renderScreen();
+  const subdivision = () =>
+    within(screen.getByRole("group", { name: "Subdivision" }))
+      .getAllByRole("radio")
+      .map((radio) => radio.closest("label")?.textContent);
+  expect(subdivision()).toEqual(["Off", "8th", "Triplet", "16th", "Quintuplet", "Sextuplet"]);
+
+  const unit = screen.getByRole("combobox", { name: "Beat Unit" });
+  fireEvent.change(unit, { target: { value: "8" } });
+  expect(subdivision()).toEqual(["Off", "16th", "Triplet", "32nd", "Quintuplet", "Sextuplet"]);
+  fireEvent.change(unit, { target: { value: "2" } });
+  expect(subdivision()).toEqual(["Off", "Quarter", "Triplet", "8th", "Quintuplet", "Sextuplet"]);
+});

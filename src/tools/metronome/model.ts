@@ -189,3 +189,12 @@ export function parseBpm(text: string): number | null {
   if (value < MIN_BPM || value > MAX_BPM) return null;
   return roundBpm(value);
 }
+
+/**
+ * Note value of a subdivision click when it is a plain note: halving or
+ * quartering the beat note (in 6/8, 2 → 16th, 4 → 32nd). `null` for tuplets
+ * and for no subdivision.
+ */
+export function subdivisionNote(subdivision: number, noteValue: number): number | null {
+  return subdivision === 2 || subdivision === 4 ? noteValue * subdivision : null;
+}
