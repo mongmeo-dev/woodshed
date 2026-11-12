@@ -115,6 +115,7 @@ cd src-tauri && mise exec -- cargo run --release --example latency_probe
 ## 미결 사항
 
 - htdemucs_6s 가중치에는 별도 라이선스 표기가 없습니다(코드는 MIT). 배포 방식을 정할 때 다시 확인합니다.
+- 스템 분리가 링크하는 Core ML 바인딩 `objc2-core-ml`(MIT·Zlib·Apache-2.0, Tauri가 쓰는 objc2 계열)은 배포 크레이트에 라이선스 파일이 없어 `LICENSES/rust-audio-crates.*`에 넣지 않았습니다(같은 계열인 `objc2`·`block2`도 아직 고지가 없습니다). 배포 방식을 정할 때 objc2 저장소의 MIT 전문과 함께 고지합니다.
 - 스템 분리는 Intel Mac에서 시험하지 않았습니다. 서명·번들된 앱의 첫 실행에서 GPU 커널 컴파일(10~35초)이 시스템 캐시에 남는지도 다시 재야 합니다.
 - 번들한 `yt-dlp_macos`는 PyInstaller 묶음이라 결합 저작물로는 GPLv3+입니다(yt-dlp 자체는 Unlicense). 앱은 별도 프로세스로 실행만 합니다. 배포 방식을 정할 때 다시 확인합니다.
 - YouTube는 JS 런타임 없이 yt-dlp 기본 클라이언트로 받습니다. 일부 영상 형식이 막히면 JS 런타임(deno 등) 번들 여부를 정해야 합니다.
