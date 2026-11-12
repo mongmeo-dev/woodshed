@@ -83,6 +83,7 @@ pub struct SeparationService {
     library: Library,
     shared: Arc<Shared>,
     emit: Emit,
+    worker: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl SeparationService {
@@ -104,16 +105,21 @@ impl SeparationService {
         let spawned = std::thread::Builder::new()
             .name("stem-separation".into())
             .spawn(move || worker.run());
-        if let Err(error) = spawned {
-            log::error!("cannot start the separation thread: {error}");
-            let mut state = lock(&shared.state);
-            state.shutdown = true;
-            state.stopped = true;
-        }
+        let worker = match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                log::error!("cannot start the separation thread: {error}");
+                let mut state = lock(&shared.state);
+                state.shutdown = true;
+                state.stopped = true;
+                None
+            }
+        };
         Self {
             library,
             shared,
             emit,
+            worker: Mutex::new(worker),
         }
     }
 
@@ -165,8 +171,11 @@ impl SeparationService {
     }
 
     /// Stops the worker (app exit): the queue is dropped, a running job
-    /// stops at its next chunk and cleans up. Waits a few seconds at most;
-    /// whatever is left is recovered at the next start.
+    /// stops at its next chunk and cleans up, and the thread is joined. A
+    /// prediction cannot be interrupted (the first one after installing the
+    /// model compiles GPU kernels for 10–35 s), so this waits a few seconds
+    /// at most and then leaves the thread to the process exit; whatever it
+    /// left is recovered at the next start.
     pub fn shutdown(&self) {
         let mut state = lock(&self.shared.state);
         state.shutdown = true;
@@ -189,6 +198,17 @@ impl SeparationService {
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }
+        drop(state);
+        if let Some(handle) = lock(&self.worker).take() {
+            // It has marked itself stopped; only its return is left.
+            let _ = handle.join();
+        }
+    }
+
+    /// True once the worker thread has been joined (tests).
+    #[cfg(test)]
+    pub(crate) fn joined(&self) -> bool {
+        lock(&self.worker).is_none()
     }
 }
 

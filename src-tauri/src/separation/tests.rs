@@ -772,6 +772,34 @@ fn service_marks_a_failed_separation_and_can_retry() {
     events.wait(&song.id, STATE_DONE);
     assert!(lib.library.get(&song.id).unwrap().stems_ready());
     service.shutdown();
+    assert!(service.joined(), "the worker thread is joined at exit");
+}
+
+#[test]
+fn exit_during_a_prediction_that_cannot_stop_returns_and_the_next_start_recovers() {
+    let _heavy = heavy();
+    let lib = TempLibrary::new("exit");
+    let song = lib.import("song", 44_100, 1, 100_000, tones(44_100));
+    let model = FakeModel::new(SPLIT);
+    let gate = Arc::new(Gate::default());
+    model.set(|b| b.hold = Some(gate.clone()));
+    let events = Events::default();
+    let service = start_service(&lib, &model, &events);
+    service.separate(&song.id).unwrap();
+    gate.wait_arrived();
+    // Like a cold GPU compile: the prediction does not return in time.
+    let started = Instant::now();
+    service.shutdown();
+    let waited = started.elapsed();
+    assert!(waited < Duration::from_secs(5), "exit waited {waited:?}");
+    assert!(!service.joined());
+    assert!(lib.song_dir(&song.id).join(WORK_DIR).exists());
+    gate.open();
+    events.wait(&song.id, STATE_CANCELLED);
+    // Whatever a killed process would have left is put right at start.
+    job::recover(&lib.library);
+    assert!(lib.library.get(&song.id).unwrap().stems.is_empty());
+    assert!(!lib.song_dir(&song.id).join(WORK_DIR).exists());
 }
 
 #[test]
