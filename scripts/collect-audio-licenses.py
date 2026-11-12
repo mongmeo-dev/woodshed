@@ -108,5 +108,8 @@ with open(os.path.join(out, "rust-audio-crates.md"), "w", encoding="utf-8") as h
                  "| Crate | Version | License | Used | Source |\n|---|---|---|---|---|\n")
     handle.write("\n".join(rows) + "\n")
 with open(os.path.join(out, "rust-audio-crates.txt"), "w", encoding="utf-8") as handle:
-    handle.write("\n".join(texts))
+    # Trailing whitespace in the upstream texts carries no meaning; drop it
+    # so `git diff --check` stays clean.
+    joined = "\n".join(texts)
+    handle.write("\n".join(line.rstrip() for line in joined.split("\n")))
 print(f"{len(rows)} crates", file=sys.stderr)
