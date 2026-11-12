@@ -1,6 +1,7 @@
 pub mod app_audio;
 pub mod audio;
 pub mod drums;
+pub mod separation;
 pub mod settings;
 pub mod stems;
 pub mod tuner;
