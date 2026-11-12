@@ -607,3 +607,70 @@ fn the_click_source_renders_without_allocating() {
     assert!(heard);
     rig.assert_on_time();
 }
+
+/// 120 BPM, 4/4, one bar at a maximum of 120 then stop: the last beat is at
+/// 2 880 + 3 × 24 000 = 74 880 and playback would end at 98 880.
+fn stopping_trainer() -> MetronomeSettings {
+    settings(|s| {
+        s.trainer = Trainer {
+            enabled: true,
+            every_bars: 1,
+            step_bpm: 5.0,
+            max_bpm: 120.0,
+            at_max: TrainerEnd::Stop,
+        };
+    })
+}
+
+/// A label, an edit, and the main-beat frames expected after it.
+type Change = (&'static str, fn(&mut MetronomeSettings), &'static [u64]);
+
+#[test]
+fn a_change_after_the_last_beat_but_before_the_planned_stop_keeps_playing() {
+    let changes: [Change; 3] = [
+        (
+            "hold",
+            |s| s.trainer.at_max = TrainerEnd::Hold,
+            &[98_880, 122_880, 146_880],
+        ),
+        (
+            "off",
+            |s| s.trainer.enabled = false,
+            &[98_880, 122_880, 146_880],
+        ),
+        // 125 BPM from the next bar: 23 040 frames per beat.
+        (
+            "higher max",
+            |s| s.trainer.max_bpm = 140.0,
+            &[98_880, 121_920, 144_960],
+        ),
+    ];
+    for (label, change, next) in changes {
+        let start = stopping_trainer();
+        let mut rig = Rig::recording(&start, 48_000, 2_880);
+        rig.run(80_000.0 / 48_000.0);
+        assert_eq!(*main_frames(&rig).last().unwrap(), 74_880, "{label}");
+        let mut changed = start.clone();
+        change(&mut changed);
+        rig.update(&changed);
+        rig.run(3.0);
+        assert_eq!(&main_frames(&rig)[4..7], next, "{label}");
+        assert!(!rig.scheduler.is_done(rig.now()), "{label}");
+        rig.assert_on_time();
+    }
+}
+
+#[test]
+fn a_change_that_still_stops_keeps_the_planned_stop() {
+    let start = stopping_trainer();
+    let mut rig = Rig::recording(&start, 48_000, 2_880);
+    rig.run(80_000.0 / 48_000.0);
+    rig.update(&settings(|s| {
+        *s = stopping_trainer();
+        s.sound = Sound::Beep;
+    }));
+    rig.run(3.0);
+    assert_eq!(main_frames(&rig).len(), 4, "no beat after the stop");
+    assert!(rig.scheduler.is_done(98_880));
+    assert!(!rig.scheduler.is_done(98_879));
+}
