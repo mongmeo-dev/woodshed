@@ -8,6 +8,8 @@
 //! The manager talks to the outside through [`OutputEnv`], so the state
 //! machine is tested with a fake environment (see the tests below).
 
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::device::StreamErrorKind;
@@ -159,6 +161,18 @@ pub enum SelectError {
     /// running preference is the new choice until the app quits.
     #[error("cannot save the output choice: {0}")]
     SaveFailed(String),
+    /// The request's deadline had passed before the manager could start it;
+    /// nothing was changed.
+    #[error("the output request expired before it started")]
+    Expired,
+}
+
+/// State right after a request was handled, so callers need not query the
+/// engine again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectOutcome {
+    pub output: Option<OpenedOutput>,
+    pub preferred: Option<String>,
 }
 
 /// One unit of work for the manager, processed strictly in arrival order.
@@ -295,15 +309,31 @@ impl<E: OutputEnv> OutputManager<E> {
         self.mode = OutputMode::Failed { retry };
     }
 
-    /// Periodic check: forwards device list changes and keeps the output on
-    /// target, within the retry limits.
-    pub fn tick(&mut self, now: Instant) {
+    /// Reads the device list, announces it if it differs from the last one
+    /// seen, and makes it the new reference. Every input goes through here,
+    /// so no change is swallowed by whichever input happens to see it first.
+    fn observe_devices(&mut self) -> (DeviceSnapshot, bool) {
         let snapshot = self.env.snapshot();
-        let devices_changed = self.last_snapshot.as_ref() != Some(&snapshot);
-        if devices_changed && self.last_snapshot.is_some() {
+        let changed = self.last_snapshot.as_ref() != Some(&snapshot);
+        if changed && self.last_snapshot.is_some() {
             self.env.devices_changed(&snapshot);
         }
         self.last_snapshot = Some(snapshot.clone());
+        (snapshot, changed)
+    }
+
+    /// The output and preference in effect now.
+    pub fn outcome(&self) -> SelectOutcome {
+        SelectOutcome {
+            output: self.env.current(),
+            preferred: self.preferred.clone(),
+        }
+    }
+
+    /// Periodic check: forwards device list changes and keeps the output on
+    /// target, within the retry limits.
+    pub fn tick(&mut self, now: Instant) {
+        let (snapshot, devices_changed) = self.observe_devices();
 
         match self.mode.clone() {
             OutputMode::Starting => {
@@ -360,8 +390,7 @@ impl<E: OutputEnv> OutputManager<E> {
     /// in effect immediately, even if it cannot be opened or saved.
     pub fn select(&mut self, device: Option<String>, now: Instant) -> Result<(), SelectError> {
         self.preferred = device;
-        let snapshot = self.env.snapshot();
-        self.last_snapshot = Some(snapshot.clone());
+        let (snapshot, _) = self.observe_devices();
         let on_target = self.settle(now, &snapshot, None);
         let saved = self.env.save_preferred(self.preferred.as_deref());
         if !on_target {
@@ -372,6 +401,93 @@ impl<E: OutputEnv> OutputManager<E> {
             ));
         }
         saved.map_err(SelectError::SaveFailed)
+    }
+}
+
+/// Messages for the output manager thread.
+pub enum ManagerRequest {
+    /// Switch to `device_id` (`None` = system default) unless `deadline` has
+    /// already passed when the manager gets to it.
+    Select {
+        device_id: Option<String>,
+        deadline: Instant,
+        reply: Sender<Result<SelectOutcome, SelectError>>,
+    },
+    /// Stop the loop.
+    Shutdown,
+}
+
+fn publish<E: OutputEnv>(manager: &OutputManager<E>, preferred: &Mutex<Option<String>>) {
+    *preferred.lock().unwrap_or_else(PoisonError::into_inner) =
+        manager.preferred().map(str::to_owned);
+}
+
+/// Handles one request; returns false on shutdown.
+fn serve<E: OutputEnv>(manager: &mut OutputManager<E>, request: ManagerRequest) -> bool {
+    match request {
+        ManagerRequest::Shutdown => false,
+        ManagerRequest::Select {
+            device_id,
+            deadline,
+            reply,
+        } => {
+            let now = Instant::now();
+            let result = if now > deadline {
+                Err(SelectError::Expired)
+            } else {
+                manager.select(device_id, now).map(|()| manager.outcome())
+            };
+            // The caller may have stopped waiting; the result is applied and
+            // announced (output-changed, published preference) either way.
+            let _ = reply.send(result);
+            true
+        }
+    }
+}
+
+/// The output manager thread's loop. Requests already waiting are handled
+/// before the next tick, and the next tick is due `poll` after the previous
+/// one finished, so a slow tick cannot starve requests. The preference in
+/// effect is published to `preferred` after every input. Returns the manager
+/// on `Shutdown` or when every sender is gone.
+pub fn run_output_manager<E: OutputEnv>(
+    mut manager: OutputManager<E>,
+    inbox: Receiver<ManagerRequest>,
+    poll: Duration,
+    preferred: Arc<Mutex<Option<String>>>,
+) -> OutputManager<E> {
+    publish(&manager, &preferred);
+    let mut next_tick = Instant::now();
+    loop {
+        loop {
+            match inbox.try_recv() {
+                Ok(request) => {
+                    if !serve(&mut manager, request) {
+                        return manager;
+                    }
+                    publish(&manager, &preferred);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return manager,
+            }
+        }
+        let now = Instant::now();
+        if now >= next_tick {
+            manager.tick(now);
+            publish(&manager, &preferred);
+            next_tick = Instant::now() + poll;
+            continue;
+        }
+        match inbox.recv_timeout(next_tick - now) {
+            Ok(request) => {
+                if !serve(&mut manager, request) {
+                    return manager;
+                }
+                publish(&manager, &preferred);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return manager,
+        }
     }
 }
 
@@ -390,6 +506,10 @@ mod tests {
     #[derive(Default)]
     struct FakeEnv {
         listed: Vec<String>,
+        inputs: Vec<String>,
+        snapshots_started: Arc<std::sync::atomic::AtomicUsize>,
+        snapshot_delay: Duration,
+        open_delay: Duration,
         default: Option<String>,
         openable: HashSet<String>,
         rates: HashMap<String, u32>,
@@ -431,6 +551,7 @@ mod tests {
                 .or_else(|| self.default.clone())
                 .ok_or("no default")?;
             self.open_attempts.push(id.clone());
+            std::thread::sleep(self.open_delay);
             if !self.listed.contains(&id) || !self.openable.contains(&id) {
                 return Err(format!("{id} failed"));
             }
@@ -460,8 +581,12 @@ mod tests {
         }
 
         fn snapshot(&mut self) -> DeviceSnapshot {
+            self.snapshots_started
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(self.snapshot_delay);
             DeviceSnapshot {
                 outputs: self.listed.clone(),
+                inputs: self.inputs.clone(),
                 default_output: self.default.clone(),
                 ..DeviceSnapshot::default()
             }
@@ -725,5 +850,145 @@ mod tests {
             .collect();
         let expected: Vec<u64> = (1..=manager.env().generation).collect();
         assert_eq!(generations, expected);
+    }
+
+    #[test]
+    fn an_input_change_seen_first_by_a_selection_is_still_announced_once() {
+        let start = Instant::now();
+        let env = FakeEnv::new(&[A, C], A, &[A, C]);
+        let mut manager = OutputManager::new(env, None);
+        manager.handle(OutputInput::Tick, start);
+        manager.env_mut().inputs.push("coreaudio:mic".into());
+        manager.handle(OutputInput::Select(Some(C.into())), secs(start, 1));
+        manager.handle(OutputInput::Tick, secs(start, 2));
+        assert_eq!(manager.env().device_events, 1);
+    }
+
+    type LoopHandles = (
+        Sender<ManagerRequest>,
+        Arc<Mutex<Option<String>>>,
+        std::thread::JoinHandle<OutputManager<FakeEnv>>,
+    );
+
+    fn spawn_loop(manager: OutputManager<FakeEnv>, poll: Duration) -> LoopHandles {
+        let (requests, inbox) = std::sync::mpsc::channel();
+        let preferred = Arc::new(Mutex::new(None));
+        let published = Arc::clone(&preferred);
+        let thread =
+            std::thread::spawn(move || run_output_manager(manager, inbox, poll, published));
+        (requests, preferred, thread)
+    }
+
+    fn select_request(
+        device: &str,
+        deadline: Instant,
+    ) -> (
+        ManagerRequest,
+        std::sync::mpsc::Receiver<Result<SelectOutcome, SelectError>>,
+    ) {
+        let (reply, response) = std::sync::mpsc::channel();
+        (
+            ManagerRequest::Select {
+                device_id: Some(device.to_owned()),
+                deadline,
+                reply,
+            },
+            response,
+        )
+    }
+
+    #[test]
+    fn a_request_that_expires_behind_a_slow_tick_is_dropped_unexecuted() {
+        let mut env = FakeEnv::new(&[A, C], A, &[A, C]);
+        env.snapshot_delay = Duration::from_millis(300);
+        let tick_started = Arc::clone(&env.snapshots_started);
+        let (requests, preferred, thread) =
+            spawn_loop(OutputManager::new(env, None), Duration::from_secs(60));
+        // Wait until the first tick is inside its slow device scan.
+        while tick_started.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            std::thread::yield_now();
+        }
+        let (request, response) = select_request(C, Instant::now() + Duration::from_millis(50));
+        requests.send(request).unwrap();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        let manager = thread.join().unwrap();
+
+        assert_eq!(response.recv().unwrap(), Err(SelectError::Expired));
+        assert_eq!(manager.env().current_id(), Some(A));
+        assert_eq!(manager.env().attempts_on(C), 0);
+        assert_eq!(manager.env().saved, Vec::<Option<String>>::new());
+        assert_eq!(*preferred.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn a_request_whose_deadline_passes_mid_switch_completes_and_is_published() {
+        let mut env = FakeEnv::new(&[A, C], A, &[A, C]);
+        env.open_delay = Duration::from_millis(150);
+        let manager = OutputManager::new(env, None);
+        let (request, response) = select_request(C, Instant::now() + Duration::from_millis(50));
+        // Queued before the loop starts: handled before the first tick.
+        let (requests, inbox) = std::sync::mpsc::channel();
+        requests.send(request).unwrap();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        let preferred = Arc::new(Mutex::new(None));
+        let manager = run_output_manager(
+            manager,
+            inbox,
+            Duration::from_secs(60),
+            Arc::clone(&preferred),
+        );
+
+        let outcome = response.recv().unwrap().unwrap();
+        assert_eq!(outcome.output.unwrap().device_id, C);
+        assert_eq!(outcome.preferred.as_deref(), Some(C));
+        assert_eq!(preferred.lock().unwrap().as_deref(), Some(C));
+        assert_eq!(manager.env().announced.last().unwrap().device_id, C);
+        assert_eq!(
+            manager.env().attempts_on(A),
+            0,
+            "the request ran before any tick"
+        );
+    }
+
+    #[test]
+    fn waiting_requests_run_before_the_next_tick() {
+        let env = FakeEnv::new(&[A, B, C], A, &[A, B, C]);
+        let (requests, inbox) = std::sync::mpsc::channel();
+        let far = Instant::now() + Duration::from_secs(10);
+        let (first, first_reply) = select_request(B, far);
+        let (second, second_reply) = select_request(C, far);
+        requests.send(first).unwrap();
+        requests.send(second).unwrap();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        let manager = run_output_manager(
+            OutputManager::new(env, None),
+            inbox,
+            Duration::ZERO,
+            Arc::default(),
+        );
+        assert!(first_reply.recv().unwrap().is_ok());
+        assert!(second_reply.recv().unwrap().is_ok());
+        let opened: Vec<&str> = manager
+            .env()
+            .open_attempts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            opened,
+            vec![B, C],
+            "both requests, in order, before any tick"
+        );
+    }
+
+    #[test]
+    fn shutdown_stops_the_loop_promptly() {
+        let env = FakeEnv::new(&[A], A, &[A]);
+        let (requests, _preferred, thread) =
+            spawn_loop(OutputManager::new(env, None), Duration::from_secs(60));
+        let started = Instant::now();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        thread.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

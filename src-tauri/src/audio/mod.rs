@@ -47,8 +47,8 @@ pub use input::{
 pub use monitor::{DeviceMonitor, DeviceSnapshot, spawn_device_monitor};
 pub use offline::OfflineEngine;
 pub use output_manager::{
-    OpenedOutput, OutputEnv, OutputInput, OutputManager, OutputMode, OutputProblem, RetryBackoff,
-    SelectError, output_problem,
+    ManagerRequest, OpenedOutput, OutputEnv, OutputInput, OutputManager, OutputMode, OutputProblem,
+    RetryBackoff, SelectError, SelectOutcome, output_problem, run_output_manager,
 };
 pub use shared::{EngineStats, SharedState, TimingSnapshot};
 pub use source::{ClickSource, Source, testing};

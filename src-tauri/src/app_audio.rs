@@ -2,6 +2,7 @@
 //! forwards "this sound is heard at" reports to the webview over channels.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use rtrb::Consumer;
@@ -11,9 +12,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::audio::{
     AudioEngine, ClickSource, DeviceInfo, DeviceSnapshot, Direction, EngineConfig, EngineStats,
-    EventKind, FramePos, OpenedOutput, OutputEnv, OutputInput, OutputManager, OutputRequest,
+    EventKind, FramePos, ManagerRequest, OpenedOutput, OutputEnv, OutputManager, OutputRequest,
     OutputStreamInfo, RenderedEvent, SelectError, SourceId, StreamErrorKind, list_devices,
-    output_device_sample_rate,
+    output_device_sample_rate, run_output_manager,
 };
 use crate::settings::SettingsStore;
 
@@ -64,6 +65,10 @@ pub struct AudioStatus {
     pub output: Option<OutputStreamInfo>,
     pub output_latency_ms: Option<f64>,
     pub stats: EngineStats,
+    /// Output device chosen by the user and in effect (`None` = system
+    /// default). It can differ from the device playing (fallback) and from
+    /// the settings file (if saving failed).
+    pub preferred_device_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,20 +87,15 @@ pub enum DeviceDirection {
 
 type Subscribers = Arc<Mutex<Vec<Channel<PlaybackEvent>>>>;
 
-/// Work sent to the output manager thread.
-enum ManagerRequest {
-    Select {
-        device_id: Option<String>,
-        reply: mpsc::Sender<Result<(), SelectError>>,
-    },
-}
-
 pub struct AudioService {
     engine: Arc<Mutex<AudioEngine>>,
     subscribers: Subscribers,
     test_sound: SourceId,
     /// The only way to change the output: requests to the manager thread.
     requests: mpsc::Sender<ManagerRequest>,
+    /// Preference in effect, published by the manager after every input.
+    preferred: Arc<Mutex<Option<String>>>,
+    manager_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -116,10 +116,12 @@ impl AudioService {
         let engine = Arc::new(Mutex::new(engine));
         let subscribers: Subscribers = Arc::default();
         spawn_notifier(Arc::clone(&engine), Arc::clone(&subscribers), notifications);
-        let requests = spawn_output_manager(
+        let preferred = Arc::new(Mutex::new(settings.get().output_device_id));
+        let (requests, manager_thread) = spawn_output_manager(
             app.clone(),
             Arc::clone(&engine),
             settings.get().output_device_id,
+            Arc::clone(&preferred),
         );
 
         Self {
@@ -127,6 +129,16 @@ impl AudioService {
             subscribers,
             test_sound,
             requests,
+            preferred,
+            manager_thread: Mutex::new(Some(manager_thread)),
+        }
+    }
+
+    /// Stops the output manager thread and waits for it (app exit).
+    pub fn shutdown(&self) {
+        let _ = self.requests.send(ManagerRequest::Shutdown);
+        if let Some(thread) = lock(&self.manager_thread).take() {
+            let _ = thread.join();
         }
     }
 
@@ -140,6 +152,7 @@ impl AudioService {
             output: engine.output_info().cloned(),
             output_latency_ms: engine.output_latency().map(|latency| latency.millis()),
             stats: engine.stats(),
+            preferred_device_id: lock(&self.preferred).clone(),
         }
     }
 }
@@ -163,12 +176,18 @@ struct TauriOutputEnv {
 
 impl OutputEnv for TauriOutputEnv {
     fn open(&mut self, device: Option<&str>) -> Result<OpenedOutput, String> {
-        let mut engine = lock(&self.engine);
-        let info = engine
-            .open_output(&OutputRequest {
+        // Build without holding the engine (device lookup and stream creation
+        // can be slow); only the swap itself takes the lock.
+        let starter = lock(&self.engine).output_starter();
+        let pending = starter
+            .build(&OutputRequest {
                 device_id: device.map(str::to_owned),
                 target_buffer_frames: TARGET_BUFFER_FRAMES,
             })
+            .map_err(|error| error.to_string())?;
+        let mut engine = lock(&self.engine);
+        let info = engine
+            .commit_output(pending)
             .map_err(|error| error.to_string())?;
         Ok(opened_output(&info, engine.generation()))
     }
@@ -221,39 +240,34 @@ impl OutputEnv for TauriOutputEnv {
     }
 }
 
-/// Starts the thread that owns the output. It handles requests in arrival
-/// order and ticks once per [`DEVICE_POLL`]; both run on this one thread, so
-/// a tick can never act on a state that a request has already replaced.
+/// Starts the thread that owns the output (see [`run_output_manager`]).
 fn spawn_output_manager(
     app: AppHandle,
     engine: Arc<Mutex<AudioEngine>>,
     preferred: Option<String>,
-) -> mpsc::Sender<ManagerRequest> {
+    published: Arc<Mutex<Option<String>>>,
+) -> (mpsc::Sender<ManagerRequest>, JoinHandle<()>) {
     let (requests, inbox) = mpsc::channel::<ManagerRequest>();
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("audio-output".into())
         .spawn(move || {
-            let mut manager = OutputManager::new(TauriOutputEnv { app, engine }, preferred);
-            let mut next_tick = Instant::now();
-            loop {
-                let now = Instant::now();
-                if now >= next_tick {
-                    manager.handle(OutputInput::Tick, now);
-                    next_tick = now + DEVICE_POLL;
-                    continue;
-                }
-                match inbox.recv_timeout(next_tick - now) {
-                    Ok(ManagerRequest::Select { device_id, reply }) => {
-                        let result = manager.select(device_id, Instant::now());
-                        let _ = reply.send(result);
-                    }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                }
-            }
+            let manager = OutputManager::new(TauriOutputEnv { app, engine }, preferred);
+            run_output_manager(manager, inbox, DEVICE_POLL, published);
         })
         .expect("spawn audio output manager");
-    requests
+    (requests, thread)
+}
+
+/// Waits for a reply on the blocking pool, so the async command (and the
+/// webview's IPC thread) never blocks on the manager.
+async fn await_reply<T: Send + 'static>(
+    response: mpsc::Receiver<T>,
+    timeout: Duration,
+) -> Option<T> {
+    tauri::async_runtime::spawn_blocking(move || response.recv_timeout(timeout).ok())
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Logs the stream format and the measured output latency once the stream
@@ -341,13 +355,16 @@ fn spawn_notifier(
 
 // ---- commands ------------------------------------------------------------------
 
+// Commands that touch the engine or devices are async so they never run on
+// the webview's IPC (main) thread.
+
 #[tauri::command]
-pub fn audio_status(audio: State<'_, AudioService>) -> AudioStatus {
-    audio.status()
+pub async fn audio_status(audio: State<'_, AudioService>) -> Result<AudioStatus, String> {
+    Ok(audio.status())
 }
 
 #[tauri::command]
-pub fn audio_list_devices(direction: DeviceDirection) -> Result<Vec<DeviceInfo>, String> {
+pub async fn audio_list_devices(direction: DeviceDirection) -> Result<Vec<DeviceInfo>, String> {
     let direction = match direction {
         DeviceDirection::Input => Direction::Input,
         DeviceDirection::Output => Direction::Output,
@@ -355,36 +372,66 @@ pub fn audio_list_devices(direction: DeviceDirection) -> Result<Vec<DeviceInfo>,
     list_devices(direction).map_err(|error| error.to_string())
 }
 
-/// Why choosing an output failed. The choice is in effect either way.
+/// Why choosing an output failed.
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "code", rename_all = "camelCase")]
 pub enum OutputSelectError {
-    /// The device could not be opened; the system default plays meanwhile
-    /// and the device is retried.
+    /// The device could not be opened; the choice is in effect, the system
+    /// default plays meanwhile and the device is retried.
     OpenFailed { message: String },
-    /// The output switched but the choice could not be saved to disk.
+    /// The output switched but the choice could not be saved to disk; the
+    /// choice is in effect until the app quits.
     SaveFailed { message: String },
-    /// The output manager did not answer.
+    /// No answer in time. The request is dropped if it had not started; if it
+    /// had, its result arrives through `audio://output-changed` and
+    /// `audio_status().preferredDeviceId`.
     Unavailable,
 }
 
+/// The output and preference right after the manager handled the choice.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputSelection {
+    pub output: Option<OutputChanged>,
+    pub preferred_device_id: Option<String>,
+}
+
 /// Asks the output manager to switch to `device_id` (`None` = system
-/// default) and to save the choice; returns the new status.
+/// default) and to save the choice. Async: the wait runs on the blocking
+/// pool, never on the webview's IPC thread.
 #[tauri::command]
-pub fn audio_set_output_device(
+pub async fn audio_set_output_device(
     audio: State<'_, AudioService>,
     device_id: Option<String>,
-) -> Result<AudioStatus, OutputSelectError> {
+) -> Result<OutputSelection, OutputSelectError> {
     let (reply, response) = mpsc::channel();
+    let deadline = Instant::now() + SELECT_TIMEOUT;
     audio
         .requests
-        .send(ManagerRequest::Select { device_id, reply })
+        .send(ManagerRequest::Select {
+            device_id,
+            deadline,
+            reply,
+        })
         .map_err(|_| OutputSelectError::Unavailable)?;
-    match response.recv_timeout(SELECT_TIMEOUT) {
-        Ok(Ok(())) => Ok(audio.status()),
-        Ok(Err(SelectError::OpenFailed(message))) => Err(OutputSelectError::OpenFailed { message }),
-        Ok(Err(SelectError::SaveFailed(message))) => Err(OutputSelectError::SaveFailed { message }),
-        Err(_) => Err(OutputSelectError::Unavailable),
+    match await_reply(response, SELECT_TIMEOUT).await {
+        Some(Ok(outcome)) => Ok(OutputSelection {
+            output: outcome.output.map(|output| OutputChanged {
+                generation: output.generation,
+                device_id: output.device_id,
+                sample_rate: output.sample_rate,
+                channels: output.channels,
+                buffer_frames: output.buffer_frames,
+            }),
+            preferred_device_id: outcome.preferred,
+        }),
+        Some(Err(SelectError::OpenFailed(message))) => {
+            Err(OutputSelectError::OpenFailed { message })
+        }
+        Some(Err(SelectError::SaveFailed(message))) => {
+            Err(OutputSelectError::SaveFailed { message })
+        }
+        Some(Err(SelectError::Expired)) | None => Err(OutputSelectError::Unavailable),
     }
 }
 
@@ -396,14 +443,19 @@ pub fn audio_subscribe(audio: State<'_, AudioService>, on_event: Channel<Playbac
 
 /// Unix-epoch ms at which `frame` will be heard on the current output.
 #[tauri::command]
-pub fn audio_heard_at(audio: State<'_, AudioService>, frame: FramePos) -> Option<f64> {
-    lock(audio.engine()).heard_at_epoch_ms(frame)
+pub async fn audio_heard_at(
+    audio: State<'_, AudioService>,
+    frame: FramePos,
+) -> Result<Option<f64>, String> {
+    Ok(lock(audio.engine()).heard_at_epoch_ms(frame))
 }
 
 /// Plays the output test sound shortly from now. Subscribers get a
 /// [`PlaybackEvent`] for it once rendered.
 #[tauri::command]
-pub fn audio_play_test_sound(audio: State<'_, AudioService>) -> Result<ScheduledSound, String> {
+pub async fn audio_play_test_sound(
+    audio: State<'_, AudioService>,
+) -> Result<ScheduledSound, String> {
     let mut engine = lock(audio.engine());
     let frame = engine.handle().frame_after(TEST_SOUND_LEAD_SECS);
     engine
@@ -421,4 +473,35 @@ pub fn audio_play_test_sound(audio: State<'_, AudioService>) -> Result<Scheduled
         frame,
         heard_at_ms: engine.heard_at_epoch_ms(frame),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waiting_for_the_manager_does_not_block_other_async_work() {
+        let (keep_open, response) = mpsc::channel::<u32>();
+        tauri::async_runtime::block_on(async move {
+            let started = Instant::now();
+            let waiting =
+                tauri::async_runtime::spawn(await_reply(response, Duration::from_millis(400)));
+            let other = tauri::async_runtime::spawn(async { 7 });
+            assert_eq!(other.await.unwrap(), 7);
+            assert!(
+                started.elapsed() < Duration::from_millis(200),
+                "other work ran while the reply was pending"
+            );
+            assert_eq!(waiting.await.unwrap(), None, "timed out without a reply");
+        });
+        drop(keep_open);
+    }
+
+    #[test]
+    fn a_reply_that_arrives_is_returned() {
+        let (reply, response) = mpsc::channel::<u32>();
+        reply.send(5).unwrap();
+        let value = tauri::async_runtime::block_on(await_reply(response, Duration::from_secs(1)));
+        assert_eq!(value, Some(5));
+    }
 }

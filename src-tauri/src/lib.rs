@@ -47,6 +47,11 @@ pub fn run() {
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Woodshed");
+        .build(tauri::generate_context!())
+        .expect("error while building Woodshed")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<app_audio::AudioService>().shutdown();
+            }
+        });
 }
