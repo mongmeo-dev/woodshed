@@ -28,3 +28,31 @@ test("saved language wins, then the first supported system language", () => {
   expect(resolveLanguage(null, ["ja-JP"])).toBe("en");
   expect(resolveLanguage(null, [])).toBe("en");
 });
+
+// 화면 문구 규칙: 구현 상태·정책·기능 소개 문장은 화면에 두지 않습니다(AGENTS.md).
+const POLICY_PHRASES = [
+  /지원하지 않/,
+  /보내지 않/,
+  /서버/,
+  /로컬/,
+  /자동으로/,
+  /수 있습니다/,
+  /not supported/i,
+  /\bunsupported\b/i,
+  /\bserver\b/i,
+  /\blocal(ly)?\b/i,
+  /\bautomatically\b/i,
+  /\bnever\b/i,
+  /\byou can\b/i,
+];
+
+test("no locale string describes a policy or a feature", () => {
+  const values = (value: unknown): string[] =>
+    typeof value === "object" && value !== null
+      ? Object.values(value).flatMap(values)
+      : [String(value)];
+  const offending = [...values(ko), ...values(en)].filter((text) =>
+    POLICY_PHRASES.some((phrase) => phrase.test(text)),
+  );
+  expect(offending).toEqual([]);
+});
