@@ -36,6 +36,14 @@ function markerNames(): string[] {
   );
 }
 
+/** Line width of every string row from the top, with the open-string name of that row. */
+function stringLines(): { name: string; width: string }[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".string-row")).map((row) => ({
+    name: row.querySelector(".string-name")?.textContent ?? "",
+    width: row.style.getPropertyValue("--string-width"),
+  }));
+}
+
 beforeEach(async () => {
   localStorage.clear();
   await i18n.changeLanguage("en");
@@ -223,5 +231,41 @@ describe("keyboard scrolling", () => {
     await i18n.changeLanguage("ko");
     render(<FretboardScreen />);
     expect(screen.getByRole("region", { name: "지판 스크롤" }).tabIndex).toBe(0);
+  });
+});
+
+describe("string thickness", () => {
+  test("guitar: the high E at the top is thin and the low E at the bottom is thick", () => {
+    render(<FretboardScreen />);
+    const lines = stringLines();
+    expect(lines).toHaveLength(6);
+    expect(lines[0]).toEqual({ name: "E", width: "1px" });
+    expect(lines[5]).toEqual({ name: "E", width: "3px" });
+  });
+
+  test("bass: G at the top is thin and the lowest string at the bottom is thick", () => {
+    render(<FretboardScreen />);
+    fireEvent.click(screen.getByRole("radio", { name: "4-String Bass" }));
+    const bass4 = stringLines();
+    expect(bass4[0]).toEqual({ name: "G", width: "1px" });
+    expect(bass4[3]).toEqual({ name: "E", width: "3px" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "5-String Bass" }));
+    const bass5 = stringLines();
+    expect(bass5[0]).toEqual({ name: "G", width: "1px" });
+    expect(bass5[4]).toEqual({ name: "B", width: "3px" });
+  });
+
+  test("a lower string is never thinner than the string above it", () => {
+    render(<FretboardScreen />);
+    for (const instrument of ["6-String Guitar", "4-String Bass", "5-String Bass"]) {
+      fireEvent.click(screen.getByRole("radio", { name: instrument }));
+      const widths = stringLines().map((line) => Number.parseFloat(line.width));
+      expect(widths.every((width) => Number.isFinite(width))).toBe(true);
+      for (let row = 1; row < widths.length; row += 1) {
+        expect(widths[row]).toBeGreaterThanOrEqual(widths[row - 1] as number);
+      }
+      expect(widths.at(-1)).toBeGreaterThan(widths[0] as number);
+    }
   });
 });
