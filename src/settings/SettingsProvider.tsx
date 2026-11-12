@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { resolveLanguage, setLanguage, systemLanguages } from "../i18n";
+import { writeCachedPrefs } from "../lib/prefsCache";
 import {
   applyTheme,
   DEFAULT_SETTINGS,
@@ -28,6 +29,7 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 function apply(settings: Settings) {
   applyTheme(settings.theme);
+  writeCachedPrefs({ theme: settings.theme, language: settings.language });
   void setLanguage(resolveLanguage(settings.language, systemLanguages()));
 }
 

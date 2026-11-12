@@ -1,4 +1,4 @@
-import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface Box {
   left: number;
@@ -35,16 +35,18 @@ export function useGlide<T extends HTMLElement>(measureKey: string) {
       );
     };
     measure();
-    // Enable the transition only after the first placement, so it does not glide in from 0.
-    const frame = requestAnimationFrame(() => setReady(true));
-    if (typeof ResizeObserver === "undefined") return () => cancelAnimationFrame(frame);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(container);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [measureKey]);
+
+  // Enable the transition only after the first placement has been committed,
+  // so the indicator does not glide in from 0. (An effect, not rAF: rAF does
+  // not run while the window is hidden.)
+  useEffect(() => {
+    if (box && !ready) setReady(true);
+  }, [box, ready]);
 
   const style: CSSProperties = box
     ? { transform: `translate(${box.left}px, ${box.top}px)`, width: box.width, height: box.height }

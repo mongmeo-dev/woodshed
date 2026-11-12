@@ -1,5 +1,6 @@
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
+import { readCachedPrefs } from "../lib/prefsCache";
 import en from "../locales/en.json";
 import ko from "../locales/ko.json";
 
@@ -44,7 +45,7 @@ export const i18n = i18next;
 
 void i18next.use(initReactI18next).init({
   resources,
-  lng: resolveLanguage(null, systemLanguages()),
+  lng: resolveLanguage(readCachedPrefs()?.language ?? null, systemLanguages()),
   fallbackLng: "en",
   interpolation: { escapeValue: false },
   returnNull: false,
