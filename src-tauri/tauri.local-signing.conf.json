@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "Woodshed Local Signing",
+      "hardenedRuntime": false
+    }
+  }
+}
