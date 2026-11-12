@@ -10,6 +10,84 @@
     "stemSplitter": "Stem Splitter",
     "fretboard": "Scale Fretboard"
   },
+  "metronome": {
+    "tempo": "Tempo",
+    "bpm": "BPM",
+    "bpmValue": "{{value}} BPM",
+    "bpmError": "Enter a number from {{min}} to {{max}}",
+    "start": "Start",
+    "stop": "Stop",
+    "tap": "Tap",
+    "slower": "1 BPM Slower",
+    "faster": "1 BPM Faster",
+    "accents": "Beat Accents",
+    "beatAccent": "Beat {{beat}}, {{accent}}",
+    "accent": {
+      "strong": "Strong",
+      "normal": "Normal",
+      "weak": "Weak",
+      "mute": "Muted"
+    },
+    "rhythm": "Rhythm",
+    "meter": "Time Signature",
+    "beatsPerBar": "Beats per Bar",
+    "beatUnit": "Beat Unit",
+    "subdivisionLabel": "Subdivision",
+    "subdivision": {
+      "1": "Off",
+      "2": "8th",
+      "3": "Triplet",
+      "4": "16th",
+      "5": "Quintuplet",
+      "6": "Sextuplet"
+    },
+    "soundLabel": "Sound",
+    "sound": {
+      "click": "Click",
+      "woodblock": "Woodblock",
+      "beep": "Beep",
+      "cowbell": "Cowbell"
+    },
+    "trainer": {
+      "section": "Tempo Trainer",
+      "on": "On",
+      "every": "Raise Every",
+      "bars": "bars",
+      "step": "Raise By",
+      "max": "Maximum Tempo",
+      "atMax": "At Maximum",
+      "hold": "Keep Playing",
+      "stop": "Stop"
+    },
+    "poly": {
+      "section": "Polyrhythm",
+      "on": "On",
+      "ratio": "Ratio",
+      "pulses": "Polyrhythm Clicks",
+      "beats": "Main Beats",
+      "sound": "Polyrhythm Sound"
+    },
+    "presets": {
+      "section": "Presets",
+      "empty": "No Presets",
+      "name": "Preset Name",
+      "save": "Save",
+      "replace": "Replace",
+      "load": "Load",
+      "loadNamed": "Load {{name}}",
+      "delete": "Delete",
+      "deleteNamed": "Delete {{name}}",
+      "confirmDelete": "Delete “{{name}}”?",
+      "cancel": "Cancel",
+      "deleted": "Deleted “{{name}}”",
+      "error": {
+        "emptyName": "Enter a name",
+        "nameTooLong": "Use {{max}} characters or fewer",
+        "tooMany": "Too many presets. Delete one, then save.",
+        "saveFailed": "Couldn't save the preset"
+      }
+    }
+  },
   "settings": {
     "title": "Settings",
     "output": {
