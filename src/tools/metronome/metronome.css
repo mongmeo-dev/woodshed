@@ -65,8 +65,7 @@
   background: var(--ws-color-chip);
   transition:
     background-color var(--ws-duration-pulse) var(--ws-ease-glide),
-    border-color var(--ws-duration-pulse) var(--ws-ease-glide),
-    height var(--ws-duration-fast) var(--ws-ease-glide);
+    border-color var(--ws-duration-pulse) var(--ws-ease-glide);
 }
 
 .beat-bar[data-accent="strong"] {
@@ -90,7 +89,7 @@
 .beat-bar[data-lit="true"] {
   background: var(--ws-color-accent);
   border-color: var(--ws-color-accent);
-  transition: height var(--ws-duration-fast) var(--ws-ease-glide);
+  transition: none;
 }
 
 .beat-bar[data-accent="mute"][data-lit="true"] {
