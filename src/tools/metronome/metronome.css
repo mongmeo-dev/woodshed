@@ -54,8 +54,8 @@
 }
 
 /*
- * Lit the instant a beat is heard (no transition in), then fades back as the
- * next beat lights.
+ * Lit the instant a beat is heard (no transition in), then fades back quickly
+ * as the next beat lights, so two beats never look lit at once.
  */
 .beat-bar {
   display: block;
@@ -64,8 +64,8 @@
   border-radius: var(--ws-radius-sm);
   background: var(--ws-color-chip);
   transition:
-    background-color var(--ws-duration-pulse) var(--ws-ease-glide),
-    border-color var(--ws-duration-pulse) var(--ws-ease-glide);
+    background-color var(--ws-duration-fast) var(--ws-ease-glide),
+    border-color var(--ws-duration-fast) var(--ws-ease-glide);
 }
 
 .beat-bar[data-accent="strong"] {
@@ -108,7 +108,7 @@
   height: var(--ws-space-xs);
   border-radius: var(--ws-radius-pill);
   background: var(--ws-color-chip);
-  transition: background-color var(--ws-duration-pulse) var(--ws-ease-glide);
+  transition: background-color var(--ws-duration-fast) var(--ws-ease-glide);
 }
 
 .pulse-dot[data-lit="true"] {
