@@ -1,0 +1,42 @@
+{
+  "nav": {
+    "label": "도구",
+    "settings": "설정"
+  },
+  "tools": {
+    "tuner": "튜너",
+    "metronome": "메트로놈",
+    "drumMachine": "드럼 머신",
+    "stemSplitter": "스템 분리",
+    "fretboard": "스케일 지판"
+  },
+  "settings": {
+    "title": "설정",
+    "output": {
+      "section": "오디오 출력",
+      "device": "출력 장치",
+      "systemDefault": "시스템 기본값",
+      "sampleRate": "샘플레이트",
+      "buffer": "버퍼 크기",
+      "latency": "출력 지연",
+      "test": "테스트음 재생",
+      "notAvailable": "출력 장치를 열 수 없습니다"
+    },
+    "language": {
+      "section": "언어",
+      "system": "시스템"
+    },
+    "theme": {
+      "section": "화면 모드",
+      "system": "시스템",
+      "light": "라이트",
+      "dark": "다크"
+    },
+    "saveFailed": "설정을 저장하지 못했습니다"
+  },
+  "units": {
+    "hz": "{{value}}Hz",
+    "frames": "{{value}}프레임",
+    "ms": "{{value}}ms"
+  }
+}
