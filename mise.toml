@@ -23,6 +23,10 @@ run = [
   "cargo test --locked",
 ]
 
+[tasks.binaries]
+description = "Fetch yt-dlp and build ffmpeg (stem splitter sidecars)"
+run = "sh scripts/fetch-binaries.sh"
+
 [tasks.check]
 description = "Run every check (web, then rust)"
 run = [
