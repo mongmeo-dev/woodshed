@@ -13,7 +13,7 @@ function row(name: string) {
 }
 
 function stepButtons(name: string) {
-  return row(name).getAllByRole("button", { name: new RegExp(`^${name}, step`) });
+  return row(name).getAllByRole("button", { name: new RegExp(`^${name}, Step`) });
 }
 
 test("shows a row of 16 steps for every track", async () => {
@@ -26,7 +26,7 @@ test("shows a row of 16 steps for every track", async () => {
 
 test("clicking a step paints the chosen velocity and clicking again clears it", async () => {
   render(<DrumMachineScreen />);
-  const step = await screen.findByRole("button", { name: "Snare, step 5" });
+  const step = await screen.findByRole("button", { name: "Snare, Step 5" });
   fireEvent.click(step);
   expect(step.getAttribute("aria-pressed")).toBe("true");
   expect(step.dataset.level).toBe("2");
@@ -75,7 +75,7 @@ test("an out-of-range tempo is flagged and not applied", async () => {
     selector: "input[type=number]",
   })) as HTMLInputElement;
   fireEvent.change(bpm, { target: { value: "500" } });
-  expect(screen.getByRole("alert").textContent).toBe("Enter 40 to 300");
+  expect(screen.getByRole("alert").textContent).toBe("Enter a number from 40 to 300");
   fireEvent.blur(bpm);
   expect(bpm.value).toBe("100");
   expect(screen.queryByRole("alert")).toBeNull();
@@ -94,14 +94,14 @@ test("patterns are saved, loaded and deleted by name", async () => {
   expect(saved.value).toBe("Verse");
 
   // Change the groove, then load the saved one back.
-  fireEvent.click(screen.getByRole("button", { name: "Kick, step 1" }));
-  expect(screen.getByRole("button", { name: "Kick, step 1" }).getAttribute("aria-pressed")).toBe(
+  fireEvent.click(screen.getByRole("button", { name: "Kick, Step 1" }));
+  expect(screen.getByRole("button", { name: "Kick, Step 1" }).getAttribute("aria-pressed")).toBe(
     "true",
   );
   fireEvent.change(saved, { target: { value: "Verse" } });
   fireEvent.change(screen.getByLabelText("Preset"), { target: { value: "rock" } });
   fireEvent.change(saved, { target: { value: "Verse" } });
-  expect(screen.getByRole("button", { name: "Kick, step 1" }).getAttribute("aria-pressed")).toBe(
+  expect(screen.getByRole("button", { name: "Kick, Step 1" }).getAttribute("aria-pressed")).toBe(
     "false",
   );
 
