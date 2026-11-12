@@ -1,6 +1,7 @@
 //! Tauri-facing audio service: owns the live engine, exposes commands, and
 //! forwards "this sound is heard at" reports to the webview over channels.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ use crate::audio::{
     output_device_sample_rate, run_output_manager,
 };
 use crate::settings::SettingsStore;
+use crate::tuner::permission::{self, MicPermission};
 
 /// Event name for device list changes (devices plugged/unplugged, default changed).
 pub const DEVICES_CHANGED_EVENT: &str = "audio://devices-changed";
@@ -69,6 +71,9 @@ pub struct AudioStatus {
     /// default). It can differ from the device playing (fallback) and from
     /// the settings file (if saving failed).
     pub preferred_device_id: Option<String>,
+    /// No output yet: macOS holds it until the user answers the microphone
+    /// prompt (the output device, or the system default, has inputs).
+    pub waiting_for_microphone: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -95,6 +100,9 @@ pub struct AudioService {
     requests: mpsc::Sender<ManagerRequest>,
     /// Preference in effect, published by the manager after every input.
     preferred: Arc<Mutex<Option<String>>>,
+    /// The manager holds the output back until the microphone prompt is
+    /// answered (see [`OutputEnv::microphone_answered`]).
+    waiting_for_microphone: Arc<AtomicBool>,
     manager_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -117,11 +125,13 @@ impl AudioService {
         let subscribers: Subscribers = Arc::default();
         spawn_notifier(Arc::clone(&engine), Arc::clone(&subscribers), notifications);
         let preferred = Arc::new(Mutex::new(settings.get().output_device_id));
+        let waiting_for_microphone = Arc::new(AtomicBool::new(false));
         let (requests, manager_thread) = spawn_output_manager(
             app.clone(),
             Arc::clone(&engine),
             settings.get().output_device_id,
             Arc::clone(&preferred),
+            Arc::clone(&waiting_for_microphone),
         );
 
         Self {
@@ -130,6 +140,7 @@ impl AudioService {
             test_sound,
             requests,
             preferred,
+            waiting_for_microphone,
             manager_thread: Mutex::new(Some(manager_thread)),
         }
     }
@@ -153,6 +164,7 @@ impl AudioService {
             output_latency_ms: engine.output_latency().map(|latency| latency.millis()),
             stats: engine.stats(),
             preferred_device_id: lock(&self.preferred).clone(),
+            waiting_for_microphone: self.waiting_for_microphone.load(Ordering::Relaxed),
         }
     }
 }
@@ -172,6 +184,10 @@ fn opened_output(info: &OutputStreamInfo, generation: u64) -> OpenedOutput {
 struct TauriOutputEnv {
     app: AppHandle,
     engine: Arc<Mutex<AudioEngine>>,
+    /// The manager's own inbox, to wake it when the microphone prompt is
+    /// answered.
+    wake: mpsc::Sender<ManagerRequest>,
+    waiting_for_microphone: Arc<AtomicBool>,
 }
 
 impl OutputEnv for TauriOutputEnv {
@@ -241,6 +257,25 @@ impl OutputEnv for TauriOutputEnv {
     fn devices_changed(&mut self, snapshot: &DeviceSnapshot) {
         let _ = self.app.emit(DEVICES_CHANGED_EVENT, snapshot);
     }
+
+    fn microphone_answered(&mut self) -> bool {
+        permission::status() != MicPermission::Undetermined
+    }
+
+    fn waiting_for_microphone(&mut self, waiting: bool) {
+        self.waiting_for_microphone
+            .store(waiting, Ordering::Relaxed);
+        if waiting {
+            crate::startup::mark("output asked for microphone access");
+            // The same system prompt the tuner shows; whichever asks first
+            // shows it, and the answer wakes the manager right away.
+            let wake = self.wake.clone();
+            permission::request(move |_| {
+                crate::startup::mark("microphone prompt answered");
+                let _ = wake.send(ManagerRequest::Recheck);
+            });
+        }
+    }
 }
 
 /// Starts the thread that owns the output (see [`run_output_manager`]).
@@ -249,12 +284,20 @@ fn spawn_output_manager(
     engine: Arc<Mutex<AudioEngine>>,
     preferred: Option<String>,
     published: Arc<Mutex<Option<String>>>,
+    waiting_for_microphone: Arc<AtomicBool>,
 ) -> (mpsc::Sender<ManagerRequest>, JoinHandle<()>) {
     let (requests, inbox) = mpsc::channel::<ManagerRequest>();
+    let wake = requests.clone();
     let thread = std::thread::Builder::new()
         .name("audio-output".into())
         .spawn(move || {
-            let manager = OutputManager::new(TauriOutputEnv { app, engine }, preferred);
+            let env = TauriOutputEnv {
+                app,
+                engine,
+                wake,
+                waiting_for_microphone,
+            };
+            let manager = OutputManager::new(env, preferred);
             run_output_manager(manager, inbox, DEVICE_POLL, published);
         })
         .expect("spawn audio output manager");

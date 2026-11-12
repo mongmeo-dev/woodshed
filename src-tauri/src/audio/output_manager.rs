@@ -45,6 +45,15 @@ pub trait OutputEnv {
     fn output_changed(&mut self, output: &OpenedOutput);
     /// Called when the device list differs from the previous tick.
     fn devices_changed(&mut self, snapshot: &DeviceSnapshot);
+    /// Whether the user has answered the system's microphone prompt, either
+    /// way. Until then macOS holds the creation of an output stream until the
+    /// answer whenever the device — or the system default output, which the
+    /// backend connects first — has inputs.
+    fn microphone_answered(&mut self) -> bool;
+    /// The manager starts (`true`) or stops (`false`) holding opens back for
+    /// the microphone answer. On `true` the environment shows the prompt; the
+    /// answer should wake the manager with [`ManagerRequest::Recheck`].
+    fn waiting_for_microphone(&mut self, waiting: bool);
 }
 
 /// Spaces out retries: the wait doubles after each failure up to `max`.
@@ -187,6 +196,8 @@ pub struct OutputManager<E: OutputEnv> {
     preferred: Option<String>,
     mode: OutputMode,
     last_snapshot: Option<DeviceSnapshot>,
+    /// Opens are held back until the microphone prompt is answered.
+    microphone_wait: bool,
 }
 
 impl<E: OutputEnv> OutputManager<E> {
@@ -196,6 +207,7 @@ impl<E: OutputEnv> OutputManager<E> {
             preferred,
             mode: OutputMode::Starting,
             last_snapshot: None,
+            microphone_wait: false,
         }
     }
 
@@ -216,6 +228,12 @@ impl<E: OutputEnv> OutputManager<E> {
         &mut self.env
     }
 
+    /// True while the target cannot be opened before the user answers the
+    /// microphone prompt.
+    pub fn waiting_for_microphone(&self) -> bool {
+        self.microphone_wait
+    }
+
     /// Processes one input. `Select` returns the outcome for its caller.
     pub fn handle(&mut self, input: OutputInput, now: Instant) -> Option<Result<(), SelectError>> {
         match input {
@@ -227,8 +245,48 @@ impl<E: OutputEnv> OutputManager<E> {
         }
     }
 
-    /// Opens through the environment and announces every success.
+    /// Whether opening `device` now would make macOS hold the stream until
+    /// the microphone prompt is answered: the device or the system default
+    /// output has inputs, and the prompt has not been answered.
+    fn held_for_microphone(&mut self, device: Option<&str>) -> bool {
+        let Some(snapshot) = self.last_snapshot.as_ref() else {
+            return false;
+        };
+        let has_inputs = |id: &str| snapshot.inputs.iter().any(|input| input == id);
+        let affected = snapshot.default_output.as_deref().is_some_and(has_inputs)
+            || device.is_some_and(has_inputs);
+        affected && !self.env.microphone_answered()
+    }
+
+    /// Starts or stops waiting for the microphone answer (the environment
+    /// shows the prompt when the wait starts).
+    fn set_microphone_wait(&mut self, waiting: bool) {
+        if self.microphone_wait == waiting {
+            return;
+        }
+        self.microphone_wait = waiting;
+        if waiting {
+            log::info!("audio output: waiting for the microphone answer before opening");
+        }
+        self.env.waiting_for_microphone(waiting);
+    }
+
+    /// Updates the wait after an input: it lasts while the target is not
+    /// playing and opening it would be held back.
+    fn update_microphone_wait(&mut self) {
+        let preferred = self.preferred.clone();
+        let waiting =
+            self.mode != OutputMode::OnTarget && self.held_for_microphone(preferred.as_deref());
+        self.set_microphone_wait(waiting);
+    }
+
+    /// Opens through the environment and announces every success. An open
+    /// that macOS would hold for the microphone answer is not started: it
+    /// fails at once, so this thread never waits inside the backend.
     fn open(&mut self, device: Option<&str>) -> Result<OpenedOutput, String> {
+        if self.held_for_microphone(device) {
+            return Err("waiting for the microphone answer".into());
+        }
         let opened = self.env.open(device);
         match &opened {
             Ok(output) => self.env.output_changed(output),
@@ -334,10 +392,19 @@ impl<E: OutputEnv> OutputManager<E> {
     /// target, within the retry limits.
     pub fn tick(&mut self, now: Instant) {
         let (snapshot, devices_changed) = self.observe_devices();
+        // The prompt was answered: open the target now, whatever retry
+        // backoff the held opens left behind.
+        if self.microphone_wait && self.env.microphone_answered() {
+            self.mode = OutputMode::Starting;
+        }
+        self.step(now, &snapshot, devices_changed);
+        self.update_microphone_wait();
+    }
 
+    fn step(&mut self, now: Instant, snapshot: &DeviceSnapshot, devices_changed: bool) {
         match self.mode.clone() {
             OutputMode::Starting => {
-                self.settle(now, &snapshot, None);
+                self.settle(now, snapshot, None);
             }
             OutputMode::OnTarget => {
                 let current = self.env.current();
@@ -348,12 +415,12 @@ impl<E: OutputEnv> OutputManager<E> {
                     current.as_ref(),
                     self.env.stream_error(),
                     rate,
-                    &snapshot,
+                    snapshot,
                     self.preferred.is_none(),
                 );
                 if let Some(problem) = problem {
                     log::info!("audio output: {problem:?}, reopening");
-                    self.settle(now, &snapshot, None);
+                    self.settle(now, snapshot, None);
                 }
             }
             OutputMode::Fallback {
@@ -371,14 +438,14 @@ impl<E: OutputEnv> OutputManager<E> {
                     }
                     preferred_retry.failed(now);
                 }
-                self.fall_back(&snapshot, preferred_retry);
+                self.fall_back(snapshot, preferred_retry);
             }
             OutputMode::Failed { mut retry } => {
                 if devices_changed {
                     retry = RetryBackoff::default();
                 }
                 if retry.ready(now) {
-                    self.settle(now, &snapshot, Some(retry));
+                    self.settle(now, snapshot, Some(retry));
                 } else {
                     self.mode = OutputMode::Failed { retry };
                 }
@@ -392,6 +459,7 @@ impl<E: OutputEnv> OutputManager<E> {
         self.preferred = device;
         let (snapshot, _) = self.observe_devices();
         let on_target = self.settle(now, &snapshot, None);
+        self.update_microphone_wait();
         let saved = self.env.save_preferred(self.preferred.as_deref());
         if !on_target {
             return Err(SelectError::OpenFailed(
@@ -413,6 +481,9 @@ pub enum ManagerRequest {
         deadline: Instant,
         reply: Sender<Result<SelectOutcome, SelectError>>,
     },
+    /// Check again now, without waiting for the next tick (the microphone
+    /// prompt was answered).
+    Recheck,
     /// Stop the loop.
     Shutdown,
 }
@@ -426,6 +497,10 @@ fn publish<E: OutputEnv>(manager: &OutputManager<E>, preferred: &Mutex<Option<St
 fn serve<E: OutputEnv>(manager: &mut OutputManager<E>, request: ManagerRequest) -> bool {
     match request {
         ManagerRequest::Shutdown => false,
+        ManagerRequest::Recheck => {
+            manager.tick(Instant::now());
+            true
+        }
         ManagerRequest::Select {
             device_id,
             deadline,
@@ -521,6 +596,10 @@ mod tests {
         announced: Vec<OpenedOutput>,
         saved: Vec<Option<String>>,
         device_events: usize,
+        /// The microphone prompt is showing (not answered yet).
+        prompt_pending: Arc<std::sync::atomic::AtomicBool>,
+        /// Every start (`true`) and end (`false`) of the microphone wait.
+        microphone_waits: Vec<bool>,
     }
 
     impl FakeEnv {
@@ -607,6 +686,33 @@ mod tests {
         fn devices_changed(&mut self, _: &DeviceSnapshot) {
             self.device_events += 1;
         }
+
+        fn microphone_answered(&mut self) -> bool {
+            !self
+                .prompt_pending
+                .load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn waiting_for_microphone(&mut self, waiting: bool) {
+            self.microphone_waits.push(waiting);
+        }
+    }
+
+    /// `A` has inputs (an audio interface) and is the default; `B` and `C`
+    /// are output-only. The microphone prompt has not been answered.
+    fn prompt_pending_env(default: &str) -> FakeEnv {
+        let mut env = FakeEnv::new(&[A, B, C], default, &[A, B, C]);
+        env.inputs = vec![A.into()];
+        env.prompt_pending
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        env
+    }
+
+    fn answer_prompt(manager: &mut OutputManager<FakeEnv>) {
+        manager
+            .env_mut()
+            .prompt_pending
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn secs(start: Instant, s: u64) -> Instant {
@@ -864,6 +970,93 @@ mod tests {
         assert_eq!(manager.env().device_events, 1);
     }
 
+    #[test]
+    fn a_default_output_with_inputs_waits_for_the_microphone_answer_then_opens_at_once() {
+        let start = Instant::now();
+        let mut manager = OutputManager::new(prompt_pending_env(A), None);
+        run_ticks(&mut manager, start, 0, 40);
+        assert!(
+            manager.env().open_attempts.is_empty(),
+            "nothing may reach the backend while macOS would hold it"
+        );
+        assert!(manager.waiting_for_microphone());
+        assert_eq!(manager.env().microphone_waits, vec![true], "asked once");
+
+        // Answered after 40 s of held retries: open on the next check, not
+        // after the grown backoff.
+        answer_prompt(&mut manager);
+        manager.handle(OutputInput::Tick, secs(start, 40));
+        assert_eq!(manager.mode(), &OutputMode::OnTarget);
+        assert_eq!(manager.env().current_id(), Some(A));
+        assert_eq!(manager.env().announced.len(), 1);
+        assert!(!manager.waiting_for_microphone());
+        assert_eq!(manager.env().microphone_waits, vec![true, false]);
+    }
+
+    #[test]
+    fn a_default_output_with_inputs_holds_back_an_output_only_choice_too() {
+        // The backend connects the system default before the chosen device,
+        // so an output-only preference waits as well.
+        let start = Instant::now();
+        let mut manager = OutputManager::new(prompt_pending_env(A), Some(B.into()));
+        run_ticks(&mut manager, start, 0, 5);
+        assert!(manager.env().open_attempts.is_empty());
+        assert!(manager.waiting_for_microphone());
+
+        answer_prompt(&mut manager);
+        manager.handle(OutputInput::Tick, secs(start, 5));
+        assert_eq!(manager.mode(), &OutputMode::OnTarget);
+        assert_eq!(manager.env().current_id(), Some(B));
+    }
+
+    #[test]
+    fn output_only_devices_open_while_the_prompt_is_pending() {
+        let start = Instant::now();
+        let mut manager = OutputManager::new(prompt_pending_env(B), None);
+        run_ticks(&mut manager, start, 0, 3);
+        assert_eq!(manager.mode(), &OutputMode::OnTarget);
+        assert_eq!(manager.env().current_id(), Some(B));
+        assert!(!manager.waiting_for_microphone());
+        assert!(
+            manager.env().microphone_waits.is_empty(),
+            "no prompt for playback alone"
+        );
+    }
+
+    #[test]
+    fn choosing_a_device_with_inputs_keeps_the_output_only_device_playing_until_the_answer() {
+        let start = Instant::now();
+        let mut manager = OutputManager::new(prompt_pending_env(B), None);
+        manager.handle(OutputInput::Tick, start);
+        assert_eq!(manager.env().current_id(), Some(B));
+
+        let result = manager.handle(OutputInput::Select(Some(A.into())), secs(start, 1));
+        assert_eq!(result, Some(Err(SelectError::OpenFailed(A.into()))));
+        assert_eq!(manager.preferred(), Some(A), "the choice is kept");
+        assert_eq!(manager.env().attempts_on(A), 0);
+        assert_eq!(manager.env().current_id(), Some(B), "B keeps playing");
+        assert!(manager.waiting_for_microphone());
+        run_ticks(&mut manager, start, 2, 10);
+        assert_eq!(manager.env().attempts_on(A), 0);
+
+        answer_prompt(&mut manager);
+        manager.handle(OutputInput::Tick, secs(start, 12));
+        assert_eq!(manager.mode(), &OutputMode::OnTarget);
+        assert_eq!(manager.env().current_id(), Some(A));
+        assert!(!manager.waiting_for_microphone());
+    }
+
+    #[test]
+    fn an_answered_prompt_never_holds_anything_back() {
+        let env = prompt_pending_env(A);
+        env.prompt_pending
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut manager = OutputManager::new(env, None);
+        manager.tick(Instant::now());
+        assert_eq!(manager.env().current_id(), Some(A));
+        assert!(manager.env().microphone_waits.is_empty());
+    }
+
     type LoopHandles = (
         Sender<ManagerRequest>,
         Arc<Mutex<Option<String>>>,
@@ -979,6 +1172,54 @@ mod tests {
             vec![B, C],
             "both requests, in order, before any tick"
         );
+    }
+
+    #[test]
+    fn while_the_prompt_is_pending_the_loop_serves_requests_and_the_answer_opens_at_once() {
+        // A backend open takes 1.5 s here, standing in for macOS holding it
+        // until the answer; the loop must never be inside one while waiting.
+        let mut env = prompt_pending_env(A);
+        env.open_delay = Duration::from_millis(1_500);
+        let prompt = Arc::clone(&env.prompt_pending);
+        let ticks = Arc::clone(&env.snapshots_started);
+        let (requests, _preferred, thread) =
+            spawn_loop(OutputManager::new(env, None), Duration::from_secs(60));
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            std::thread::yield_now();
+        }
+        // A choice made meanwhile is answered right away (kept for later).
+        let (request, response) = select_request(B, Instant::now() + Duration::from_secs(10));
+        let asked = Instant::now();
+        requests.send(request).unwrap();
+        assert_eq!(
+            response.recv().unwrap(),
+            Err(SelectError::OpenFailed(B.into()))
+        );
+        assert!(asked.elapsed() < Duration::from_secs(1));
+
+        // The answer wakes the loop before its next tick (60 s away).
+        prompt.store(false, std::sync::atomic::Ordering::SeqCst);
+        requests.send(ManagerRequest::Recheck).unwrap();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        let manager = thread.join().unwrap();
+        assert_eq!(manager.env().current_id(), Some(B));
+        assert_eq!(manager.env().open_attempts, vec![B.to_owned()]);
+    }
+
+    #[test]
+    fn shutdown_is_prompt_while_the_prompt_is_pending() {
+        let mut env = prompt_pending_env(A);
+        env.open_delay = Duration::from_secs(5);
+        let ticks = Arc::clone(&env.snapshots_started);
+        let (requests, _preferred, thread) =
+            spawn_loop(OutputManager::new(env, None), Duration::from_millis(10));
+        while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+            std::thread::yield_now();
+        }
+        let started = Instant::now();
+        requests.send(ManagerRequest::Shutdown).unwrap();
+        thread.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

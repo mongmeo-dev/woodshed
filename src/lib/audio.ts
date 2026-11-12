@@ -40,6 +40,11 @@ export interface AudioStatus {
    * from the device playing (fallback) and from the settings file.
    */
   preferredDeviceId: string | null;
+  /**
+   * No output yet: macOS holds it until the user answers the microphone
+   * prompt (the output device, or the system default, has inputs).
+   */
+  waitingForMicrophone: boolean;
 }
 
 export type EventKind =
@@ -89,6 +94,7 @@ const EMPTY_STATUS: AudioStatus = {
   output: null,
   outputLatencyMs: null,
   preferredDeviceId: null,
+  waitingForMicrophone: false,
   stats: {
     generation: 0,
     framesRendered: 0,
