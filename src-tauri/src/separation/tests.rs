@@ -18,8 +18,8 @@ use super::dsp::{
 use super::job::{OLD_STEMS_DIR, WORK_DIR};
 use super::*;
 use crate::stems::{
-    AUDIO_FILE, Library, Manifest, ProcessControl, STEMS_DIR, SeparationEvent, StemStatus,
-    TrackName, import_file,
+    AUDIO_FILE, Library, Manifest, ProcessControl, STEMS_DIR, SeparationEvent, StemPlayer,
+    StemStatus, TrackName, TrackReader, WavTrack, import_file,
 };
 
 const PLANE: usize = FREQS * FRAMES;
@@ -640,6 +640,26 @@ impl Events {
             .collect()
     }
 
+    /// Waits for the first `done`, `failed` or `cancelled` of song `id` after
+    /// its first `seen` events, and returns its state.
+    fn wait_end_after(&self, id: &str, seen: usize) -> String {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let end = self.of(id).into_iter().skip(seen).find(|(state, _)| {
+                [STATE_DONE, STATE_FAILED, STATE_CANCELLED].contains(&state.as_str())
+            });
+            if let Some((state, _)) = end {
+                return state;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no end for {id}: {:?}",
+                self.of(id)
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     /// Waits for a `state` event of song `id`.
     fn wait(&self, id: &str, state: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -847,6 +867,96 @@ fn reseparating_a_ready_song_keeps_its_stems_until_new_ones_are_complete() {
     assert!(stem_bytes(&dir) != stems, "new stems in place");
     check_stems(&lib, &saved, &OTHER_SPLIT);
     assert!(!dir.join(OLD_STEMS_DIR).exists() && !dir.join(WORK_DIR).exists());
+    service.shutdown();
+}
+
+/// Opens the song's tracks the way `stems_open` does.
+fn open_player(lib: &TempLibrary, id: &str) -> usize {
+    let manifest = lib.library.get(id).unwrap();
+    let dir = lib.song_dir(id);
+    let readers: Vec<Box<dyn TrackReader>> = manifest
+        .tracks()
+        .iter()
+        .map(|(_, path)| Box::new(WavTrack::open(&dir.join(path)).unwrap()) as Box<dyn TrackReader>)
+        .collect();
+    let tracks = readers.len();
+    StemPlayer::new(readers, 0).unwrap();
+    tracks
+}
+
+/// Review R1: a step of installing new stems fails after the WAVs are
+/// written. A song already separated keeps its six files and manifest byte
+/// for byte, right after the failure and after the next start's recovery,
+/// and the player still opens them. A song not separated yet rolls back
+/// when its manifest update (its commit) fails.
+#[test]
+fn a_failed_install_keeps_the_previous_stems_now_and_after_a_restart() {
+    let _heavy = heavy();
+    let lib = TempLibrary::new("install-faults");
+    let ready = lib.import("ready", 48_000, 2, 150_000, tones(48_000));
+    let fresh = lib.import("fresh", 44_100, 1, 100_000, tones(44_100));
+    let model = FakeModel::new(SPLIT);
+    let events = Events::default();
+    let service = start_service(&lib, &model, &events);
+    service.separate(&ready.id).unwrap();
+    events.wait(&ready.id, STATE_DONE);
+    let dir = lib.song_dir(&ready.id);
+    let manifest = manifest_text(&dir);
+    let stems = stem_bytes(&dir);
+    let unchanged = |when: &str| {
+        assert_eq!(manifest_text(&dir), manifest, "manifest {when}");
+        assert!(stem_bytes(&dir) == stems, "stem files {when}");
+        assert!(!dir.join(WORK_DIR).exists(), ".separating {when}");
+        assert!(!dir.join(OLD_STEMS_DIR).exists(), ".stems-old {when}");
+        assert_eq!(open_player(&lib, &ready.id), 6, "player {when}");
+    };
+
+    model.set(|b| b.gains = OTHER_SPLIT);
+    for step in ["finish", "move-old", "move-new"] {
+        job::faults::inject(&ready.id, step);
+        let seen = events.of(&ready.id).len();
+        service.separate(&ready.id).unwrap();
+        assert_eq!(
+            events.wait_end_after(&ready.id, seen),
+            STATE_FAILED,
+            "{step}"
+        );
+        unchanged(&format!("after a fault at {step}"));
+        job::recover(&lib.library);
+        unchanged(&format!("after a restart following a fault at {step}"));
+        job::faults::clear(&ready.id);
+    }
+
+    // The manifest of a separated song is not written when its stems are
+    // swapped, so the rename is its commit and nothing can fail after it.
+    job::faults::inject(&ready.id, "commit");
+    let seen = events.of(&ready.id).len();
+    service.separate(&ready.id).unwrap();
+    assert_eq!(events.wait_end_after(&ready.id, seen), STATE_DONE);
+    job::faults::clear(&ready.id);
+    assert_eq!(manifest_text(&dir), manifest, "still ready, not rewritten");
+    assert!(stem_bytes(&dir) != stems, "the new stems are in place");
+    check_stems(&lib, &lib.library.get(&ready.id).unwrap(), &OTHER_SPLIT);
+
+    // A song not separated yet, with an old stems/ left on disk: its
+    // manifest update fails, so the swap is undone.
+    let fresh_dir = lib.song_dir(&fresh.id);
+    fs::create_dir(fresh_dir.join(STEMS_DIR)).unwrap();
+    fs::write(fresh_dir.join(STEMS_DIR).join("left.txt"), b"older").unwrap();
+    job::faults::inject(&fresh.id, "commit");
+    service.separate(&fresh.id).unwrap();
+    assert_eq!(events.wait_end_after(&fresh.id, 0), STATE_FAILED);
+    assert_eq!(statuses(&lib, &fresh.id), vec![StemStatus::Failed; 6]);
+    assert_eq!(
+        fs::read(fresh_dir.join(STEMS_DIR).join("left.txt")).unwrap(),
+        b"older"
+    );
+    assert!(!fresh_dir.join(STEMS_DIR).join("drums.wav").exists());
+    assert!(!fresh_dir.join(WORK_DIR).exists() && !fresh_dir.join(OLD_STEMS_DIR).exists());
+    job::recover(&lib.library);
+    assert_eq!(statuses(&lib, &fresh.id), vec![StemStatus::Failed; 6]);
+    assert_eq!(open_player(&lib, &fresh.id), 1, "the original track");
+    job::faults::clear(&fresh.id);
     service.shutdown();
 }
 

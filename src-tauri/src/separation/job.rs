@@ -14,6 +14,14 @@
 //! not separated yet shows `pending`/`running` entries while it waits and
 //! runs; they return to an empty list on cancel or restart and become
 //! `failed` on failure. Manifests change only through `Library::update`.
+//!
+//! The commit point: for a song already separated (its manifest already says
+//! `ready`), renaming `.separating/` to `stems/`; nothing that can fail comes
+//! after it, so a job that reports a failure always left the previous stems
+//! in place. For a song not separated yet, the manifest update to `ready`;
+//! if it fails, the new `stems/` is moved away again (and any older
+//! directory moved back). `.stems-old/` beside `stems/` therefore only
+//! exists after a committed swap, and without `stems/` only before one.
 
 use std::fs;
 use std::io;
@@ -53,6 +61,14 @@ fn all_stems(status: StemStatus) -> Vec<StemEntry> {
         .iter()
         .map(|&name| StemEntry { name, status })
         .collect()
+}
+
+/// A step that can be made to fail in tests (`finish`, `move-old`,
+/// `move-new`, `commit`).
+fn step(_song: &str, _name: &str) -> io::Result<()> {
+    #[cfg(test)]
+    faults::hit(_song, _name)?;
+    Ok(())
 }
 
 fn remove_dir_if_present(path: &Path) -> io::Result<()> {
@@ -145,32 +161,75 @@ pub fn run(
     work.separate(&audio.left, &audio.right, stft, model, cancel, &mut output)?;
     drop(audio);
     output.writers.finish()?;
+    step(id, "finish")?;
     if cancel.load(Ordering::Relaxed) {
         return Err(SeparationError::Cancelled);
     }
     install(library, id, &dir)
 }
 
-/// Swaps the finished `.separating/` in as `stems/` and marks all six ready.
+/// Puts a leftover `.stems-old/` in order before a swap: beside `stems/` it is
+/// the previous set of a committed swap (dropped); alone it is the current
+/// set from an interrupted one (moved back).
+fn settle_backup(stems: &Path, old: &Path) -> io::Result<()> {
+    if !old.exists() {
+        return Ok(());
+    }
+    if stems.exists() {
+        remove_dir_if_present(old)
+    } else {
+        fs::rename(old, stems)
+    }
+}
+
+/// Swaps the finished `.separating/` in as `stems/` and marks all six ready
+/// (see the module docs for the commit point).
 fn install(library: &Library, id: &str, dir: &Path) -> Result<(), SeparationError> {
     let stems = dir.join(STEMS_DIR);
     let old = dir.join(OLD_STEMS_DIR);
-    remove_dir_if_present(&old)?;
+    let work = dir.join(WORK_DIR);
+    settle_backup(&stems, &old)?;
+    let was_ready = library.get(id)?.stems_ready();
     let had_stems = stems.exists();
     if had_stems {
-        fs::rename(&stems, &old)?;
+        step(id, "move-old").and_then(|()| fs::rename(&stems, &old))?;
     }
-    if let Err(error) = fs::rename(dir.join(WORK_DIR), &stems) {
+    if let Err(error) = step(id, "move-new").and_then(|()| fs::rename(&work, &stems)) {
         if had_stems {
+            // If this fails too, `.stems-old/` without `stems/` is moved back
+            // at the next start.
             let _ = fs::rename(&old, &stems);
         }
         return Err(error.into());
     }
-    library.update(id, |manifest| manifest.stems = all_stems(StemStatus::Ready))?;
+    if !was_ready {
+        let committed = step(id, "commit")
+            .map_err(SeparationError::from)
+            .and_then(|()| {
+                library.update(id, |manifest| manifest.stems = all_stems(StemStatus::Ready))?;
+                Ok(())
+            });
+        if let Err(error) = committed {
+            roll_back(&stems, &work, &old, had_stems);
+            return Err(error);
+        }
+    }
     if let Err(error) = remove_dir_if_present(&old) {
         log::warn!("cannot remove the previous stems of {id}: {error}");
     }
     Ok(())
+}
+
+/// Undoes an uncommitted swap: the new stems go back to `.separating/` (or
+/// are deleted) and the older directory, if any, returns as `stems/`.
+fn roll_back(stems: &Path, work: &Path, old: &Path, had_stems: bool) {
+    if fs::rename(stems, work).is_err() {
+        let _ = fs::remove_dir_all(stems);
+    }
+    if had_stems && !stems.exists() {
+        // If this fails, `.stems-old/` alone is moved back at the next start.
+        let _ = fs::rename(old, stems);
+    }
 }
 
 /// True when `stems/` holds all six files in the song's format and length.
@@ -201,15 +260,7 @@ pub fn recover(library: &Library) {
 
 fn recover_song(library: &Library, manifest: &Manifest) -> Result<(), SeparationError> {
     let dir = library.song_dir(&manifest.id)?;
-    let stems = dir.join(STEMS_DIR);
-    let old = dir.join(OLD_STEMS_DIR);
-    if old.exists() {
-        if stems.exists() {
-            remove_dir_if_present(&old)?;
-        } else {
-            fs::rename(&old, &stems)?;
-        }
-    }
+    settle_backup(&dir.join(STEMS_DIR), &dir.join(OLD_STEMS_DIR))?;
     remove_dir_if_present(&dir.join(WORK_DIR))?;
     if in_progress(manifest) {
         let complete = stems_complete(&dir, manifest);
@@ -224,4 +275,29 @@ fn recover_song(library: &Library, manifest: &Manifest) -> Result<(), Separation
         })?;
     }
     Ok(())
+}
+
+/// Test-only fault injection: makes a named step of one song's job fail.
+#[cfg(test)]
+pub(crate) mod faults {
+    use std::io;
+    use std::sync::Mutex;
+
+    static FAULTS: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
+
+    pub fn inject(song: &str, step: &'static str) {
+        FAULTS.lock().unwrap().push((song.to_owned(), step));
+    }
+
+    pub fn clear(song: &str) {
+        FAULTS.lock().unwrap().retain(|(s, _)| s != song);
+    }
+
+    pub fn hit(song: &str, step: &str) -> io::Result<()> {
+        let faults = FAULTS.lock().unwrap();
+        if faults.iter().any(|(s, p)| s == song && *p == step) {
+            return Err(io::Error::other(format!("injected fault at {step}")));
+        }
+        Ok(())
+    }
 }

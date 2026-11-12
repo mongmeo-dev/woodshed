@@ -164,7 +164,8 @@ let reports = engine.take_notifications();
 - `stems`가 없거나 비어 있으면 분리 전입니다. `status`는 `pending` | `running` | `ready` | `failed`입니다.
 - stem-engine은 분리 전인 곡을 큐에 넣을 때 6개 항목을 `pending`, 시작할 때 `running`으로 씁니다. 6개를 `.separating/`에 다 쓴 뒤 `stems/`로 교체하고 한 번의 `Library::update`로 모두 `ready`로 바꿉니다. 취소하면 빈 목록(분리 전), 실패하면 `failed`입니다.
 - **이미 모든 항목이 `ready`인 곡을 다시 분리할 때는 새 스템 6개가 끝나 교체할 때까지 `stems/`와 manifest를 건드리지 않습니다.** 취소·실패·앱 종료 때도 이전 스템이 그대로 남습니다. 이때 진행 중 표시는 manifest가 아니라 이벤트와 `stems_separations`로만 보입니다.
-- 앱을 시작하면 stem-engine이 복구합니다: `.separating/`을 지우고, 교체 중에 멈춰 `stems/` 없이 남은 `.stems-old/`를 되돌리고, 작업이 없는 `pending`·`running` 항목은 빈 목록으로 되돌립니다(교체까지 끝난 경우는 `ready`).
+- 커밋 시점: 이미 분리된 곡은 `.separating/` → `stems/` 이름 바꾸기가 커밋이고(manifest는 이미 `ready`라 다시 쓰지 않음) 그 뒤에는 실패할 단계가 없습니다. 분리 전 곡은 `ready`로 바꾸는 `Library::update`가 커밋이고, 이것이 실패하면 새 `stems/`를 치우고 이전 디렉터리를 되돌립니다. 그래서 `stems/` 옆의 `.stems-old/`는 커밋이 끝난 뒤에만, `stems/` 없이 혼자 있는 `.stems-old/`는 커밋 전에만 생깁니다.
+- 앱을 시작하면 stem-engine이 복구합니다: `.separating/`을 지우고, `stems/` 없이 남은 `.stems-old/`는 되돌리고 `stems/` 옆에 남은 것은 지우며, 작업이 없는 `pending`·`running` 항목은 빈 목록으로 되돌립니다(교체까지 끝난 경우는 `ready`). 분리를 시작할 때도 남은 `.stems-old/`를 같은 규칙으로 정리합니다.
 - 읽기는 Rust `stems::Library`의 `get`·`list`로 합니다. **가져온 뒤 manifest를 바꾸는 일은 `Library::update(id, |manifest| …)`로만 합니다.** 이 함수는 프로세스 전역 잠금 안에서 파일을 다시 읽고, 클로저로 고친 뒤, 고유한 임시 파일과 이름 바꾸기로 저장합니다. 그래서 분리 진행과 화면이 동시에 고쳐도 서로의 변경을 잃지 않습니다. manifest 파일을 직접 쓰지 않습니다. 타입은 `Manifest`, `StemName`, `StemStatus`, `StemEntry`입니다.
 - 트랙 결정: 모든 항목이 `ready`일 때만 `Manifest::tracks()`가 스템 트랙을 `vocals → drums → bass → guitar → piano → other` 순서(manifest에 있는 것만)로 돌려주고, 그 전에는 `original`(`audio.wav`) 하나입니다. 믹서는 이 목록대로 트랙 수가 바뀝니다.
 
