@@ -12,7 +12,13 @@ fn settings_load(store: State<'_, SettingsStore>) -> Settings {
 }
 
 #[tauri::command]
-fn settings_save(store: State<'_, SettingsStore>, settings: Settings) -> Result<Settings, String> {
+fn settings_save(
+    store: State<'_, SettingsStore>,
+    mut settings: Settings,
+) -> Result<Settings, String> {
+    // The output device belongs to the audio output manager
+    // (`audio_set_output_device`); a save from the screen never changes it.
+    settings.output_device_id = store.get().output_device_id;
     store.save(settings).map_err(|error| error.to_string())
 }
 

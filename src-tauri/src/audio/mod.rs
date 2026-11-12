@@ -25,7 +25,7 @@ mod handle;
 mod input;
 mod monitor;
 mod offline;
-mod recovery;
+mod output_manager;
 mod shared;
 mod source;
 mod types;
@@ -46,7 +46,10 @@ pub use input::{
 };
 pub use monitor::{DeviceMonitor, DeviceSnapshot, spawn_device_monitor};
 pub use offline::OfflineEngine;
-pub use recovery::{OutputState, ReopenReason, RetryBackoff, reopen_reason};
+pub use output_manager::{
+    OpenedOutput, OutputEnv, OutputInput, OutputManager, OutputMode, OutputProblem, RetryBackoff,
+    SelectError, output_problem,
+};
 pub use shared::{EngineStats, SharedState, TimingSnapshot};
 pub use source::{ClickSource, Source, testing};
 pub use types::{

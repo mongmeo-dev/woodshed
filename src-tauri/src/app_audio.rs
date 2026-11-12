@@ -1,7 +1,7 @@
 //! Tauri-facing audio service: owns the live engine, exposes commands, and
 //! forwards "this sound is heard at" reports to the webview over channels.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use rtrb::Consumer;
@@ -10,10 +10,10 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::audio::{
-    AudioEngine, AudioError, ClickSource, DeviceInfo, DeviceMonitor, DeviceSnapshot, Direction,
-    EngineConfig, EngineStats, EventKind, FramePos, OutputRequest, OutputState, OutputStreamInfo,
-    RenderedEvent, RetryBackoff, SourceId, list_devices, output_device_sample_rate, reopen_reason,
-    spawn_device_monitor,
+    AudioEngine, ClickSource, DeviceInfo, DeviceSnapshot, Direction, EngineConfig, EngineStats,
+    EventKind, FramePos, OpenedOutput, OutputEnv, OutputInput, OutputManager, OutputRequest,
+    OutputStreamInfo, RenderedEvent, SelectError, SourceId, StreamErrorKind, list_devices,
+    output_device_sample_rate,
 };
 use crate::settings::SettingsStore;
 
@@ -27,8 +27,7 @@ pub const OUTPUT_CHANGED_EVENT: &str = "audio://output-changed";
 const TARGET_BUFFER_FRAMES: u32 = 64;
 const NOTIFY_POLL: Duration = Duration::from_millis(2);
 const DEVICE_POLL: Duration = Duration::from_secs(1);
-const RETRY_MIN: Duration = Duration::from_secs(1);
-const RETRY_MAX: Duration = Duration::from_secs(30);
+const SELECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Lead time for the test sound so it is never late.
 const TEST_SOUND_LEAD_SECS: f64 = 0.03;
 
@@ -83,11 +82,20 @@ pub enum DeviceDirection {
 
 type Subscribers = Arc<Mutex<Vec<Channel<PlaybackEvent>>>>;
 
+/// Work sent to the output manager thread.
+enum ManagerRequest {
+    Select {
+        device_id: Option<String>,
+        reply: mpsc::Sender<Result<(), SelectError>>,
+    },
+}
+
 pub struct AudioService {
     engine: Arc<Mutex<AudioEngine>>,
     subscribers: Subscribers,
     test_sound: SourceId,
-    _monitor: DeviceMonitor,
+    /// The only way to change the output: requests to the manager thread.
+    requests: mpsc::Sender<ManagerRequest>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -95,29 +103,30 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl AudioService {
-    /// Creates the engine, opens the preferred output (falling back to the
-    /// system default) and starts the helper threads.
+    /// Creates the engine and starts the helper threads. The output manager
+    /// thread opens the preferred output (or the system default) on its
+    /// first tick and owns every later open.
     pub fn start(app: &AppHandle, settings: &SettingsStore) -> Self {
         let (mut engine, notifications) = AudioEngine::new(EngineConfig::default());
         let test_sound = engine
             .handle()
             .add_source(Box::new(ClickSource::new(1_000.0, 0.04)), 0.4)
             .expect("fresh engine queue has room");
-        if open_preferred(&mut engine, settings.get().output_device_id.as_deref()).is_ok() {
-            announce_output(app, &engine);
-        }
 
         let engine = Arc::new(Mutex::new(engine));
         let subscribers: Subscribers = Arc::default();
-        log_latency_when_ready(Arc::clone(&engine));
         spawn_notifier(Arc::clone(&engine), Arc::clone(&subscribers), notifications);
-        let monitor = watch_devices(app.clone(), Arc::clone(&engine));
+        let requests = spawn_output_manager(
+            app.clone(),
+            Arc::clone(&engine),
+            settings.get().output_device_id,
+        );
 
         Self {
             engine,
             subscribers,
             test_sound,
-            _monitor: monitor,
+            requests,
         }
     }
 
@@ -127,53 +136,124 @@ impl AudioService {
 
     fn status(&self) -> AudioStatus {
         let engine = lock(&self.engine);
-        status_of(&engine)
-    }
-}
-
-fn status_of(engine: &AudioEngine) -> AudioStatus {
-    AudioStatus {
-        output: engine.output_info().cloned(),
-        output_latency_ms: engine.output_latency().map(|latency| latency.millis()),
-        stats: engine.stats(),
-    }
-}
-
-/// Opens `preferred`, or the default output if that fails.
-fn open_preferred(
-    engine: &mut AudioEngine,
-    preferred: Option<&str>,
-) -> Result<OutputStreamInfo, AudioError> {
-    let request = |device_id: Option<&str>| OutputRequest {
-        device_id: device_id.map(str::to_owned),
-        target_buffer_frames: TARGET_BUFFER_FRAMES,
-    };
-    if let Some(id) = preferred {
-        match engine.open_output(&request(Some(id))) {
-            Ok(info) => return Ok(info),
-            Err(error) => log::warn!("cannot open output {id}, using the default: {error}"),
+        AudioStatus {
+            output: engine.output_info().cloned(),
+            output_latency_ms: engine.output_latency().map(|latency| latency.millis()),
+            stats: engine.stats(),
         }
     }
-    engine.open_output(&request(None)).inspect_err(|error| {
-        log::error!("cannot open the default output: {error}");
-    })
 }
 
-/// Emits [`OUTPUT_CHANGED_EVENT`] for the stream that is open now.
-fn announce_output(app: &AppHandle, engine: &AudioEngine) {
-    let Some(info) = engine.output_info() else {
-        return;
-    };
-    let _ = app.emit(
-        OUTPUT_CHANGED_EVENT,
-        OutputChanged {
-            generation: engine.generation(),
-            device_id: info.device_id.clone(),
-            sample_rate: info.sample_rate,
-            channels: info.channels,
-            buffer_frames: info.buffer_frames,
-        },
-    );
+fn opened_output(info: &OutputStreamInfo, generation: u64) -> OpenedOutput {
+    OpenedOutput {
+        device_id: info.device_id.clone(),
+        sample_rate: info.sample_rate,
+        channels: info.channels,
+        buffer_frames: info.buffer_frames,
+        generation,
+    }
+}
+
+/// The real world for [`OutputManager`]: the live engine, cpal devices, the
+/// settings file and webview events.
+struct TauriOutputEnv {
+    app: AppHandle,
+    engine: Arc<Mutex<AudioEngine>>,
+}
+
+impl OutputEnv for TauriOutputEnv {
+    fn open(&mut self, device: Option<&str>) -> Result<OpenedOutput, String> {
+        let mut engine = lock(&self.engine);
+        let info = engine
+            .open_output(&OutputRequest {
+                device_id: device.map(str::to_owned),
+                target_buffer_frames: TARGET_BUFFER_FRAMES,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(opened_output(&info, engine.generation()))
+    }
+
+    fn current(&self) -> Option<OpenedOutput> {
+        let engine = lock(&self.engine);
+        engine
+            .output_info()
+            .map(|info| opened_output(info, engine.generation()))
+    }
+
+    fn stream_error(&self) -> Option<StreamErrorKind> {
+        lock(&self.engine).stream_error()
+    }
+
+    fn device_rate(&self, device_id: &str) -> Option<u32> {
+        output_device_sample_rate(device_id)
+    }
+
+    fn snapshot(&mut self) -> DeviceSnapshot {
+        DeviceSnapshot::capture()
+    }
+
+    fn save_preferred(&mut self, preferred: Option<&str>) -> Result<(), String> {
+        let store = self.app.state::<SettingsStore>();
+        let mut settings = store.get();
+        settings.output_device_id = preferred.map(str::to_owned);
+        store
+            .save(settings)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn output_changed(&mut self, output: &OpenedOutput) {
+        let _ = self.app.emit(
+            OUTPUT_CHANGED_EVENT,
+            OutputChanged {
+                generation: output.generation,
+                device_id: output.device_id.clone(),
+                sample_rate: output.sample_rate,
+                channels: output.channels,
+                buffer_frames: output.buffer_frames,
+            },
+        );
+        log_latency_when_ready(Arc::clone(&self.engine));
+    }
+
+    fn devices_changed(&mut self, snapshot: &DeviceSnapshot) {
+        let _ = self.app.emit(DEVICES_CHANGED_EVENT, snapshot);
+    }
+}
+
+/// Starts the thread that owns the output. It handles requests in arrival
+/// order and ticks once per [`DEVICE_POLL`]; both run on this one thread, so
+/// a tick can never act on a state that a request has already replaced.
+fn spawn_output_manager(
+    app: AppHandle,
+    engine: Arc<Mutex<AudioEngine>>,
+    preferred: Option<String>,
+) -> mpsc::Sender<ManagerRequest> {
+    let (requests, inbox) = mpsc::channel::<ManagerRequest>();
+    std::thread::Builder::new()
+        .name("audio-output".into())
+        .spawn(move || {
+            let mut manager = OutputManager::new(TauriOutputEnv { app, engine }, preferred);
+            let mut next_tick = Instant::now();
+            loop {
+                let now = Instant::now();
+                if now >= next_tick {
+                    manager.handle(OutputInput::Tick, now);
+                    next_tick = now + DEVICE_POLL;
+                    continue;
+                }
+                match inbox.recv_timeout(next_tick - now) {
+                    Ok(ManagerRequest::Select { device_id, reply }) => {
+                        let result = manager.select(device_id, Instant::now());
+                        let _ = reply.send(result);
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        })
+        .expect("spawn audio output manager");
+    requests
 }
 
 /// Logs the stream format and the measured output latency once the stream
@@ -259,54 +339,6 @@ fn spawn_notifier(
         .expect("spawn audio notifier");
 }
 
-/// On every monitor tick: forwards device list changes to the webview, and
-/// reopens the output when it is missing, failed, unplugged, no longer the
-/// system default (in default mode), not the preferred device although that
-/// is back, or running at a rate the device no longer uses. Failed attempts
-/// back off (1 s doubling to 30 s).
-fn watch_devices(app: AppHandle, engine: Arc<Mutex<AudioEngine>>) -> DeviceMonitor {
-    let mut backoff = RetryBackoff::new(RETRY_MIN, RETRY_MAX);
-    spawn_device_monitor(DEVICE_POLL, move |snapshot: &DeviceSnapshot, changed| {
-        if changed {
-            let _ = app.emit(DEVICES_CHANGED_EVENT, snapshot);
-        }
-        let (info, stream_error) = {
-            let engine = lock(&engine);
-            (engine.output_info().cloned(), engine.stream_error())
-        };
-        let preferred = app.state::<SettingsStore>().get().output_device_id;
-        // Read outside the engine lock: it queries the device.
-        let device_rate_now = info
-            .as_ref()
-            .and_then(|info| output_device_sample_rate(&info.device_id));
-        let state = OutputState {
-            current_device: info.as_ref().map(|info| info.device_id.as_str()),
-            current_rate: info.as_ref().map(|info| info.sample_rate),
-            device_rate_now,
-            stream_error,
-            preferred: preferred.as_deref(),
-        };
-        let Some(reason) = reopen_reason(&state, snapshot) else {
-            return;
-        };
-        let now = Instant::now();
-        if !backoff.ready(now) {
-            return;
-        }
-        log::info!("audio output: reopening ({reason:?})");
-        let mut guard = lock(&engine);
-        match open_preferred(&mut guard, preferred.as_deref()) {
-            Ok(_) => {
-                backoff.succeeded(now);
-                announce_output(&app, &guard);
-                drop(guard);
-                log_latency_when_ready(Arc::clone(&engine));
-            }
-            Err(_) => backoff.failed(now),
-        }
-    })
-}
-
 // ---- commands ------------------------------------------------------------------
 
 #[tauri::command]
@@ -323,32 +355,37 @@ pub fn audio_list_devices(direction: DeviceDirection) -> Result<Vec<DeviceInfo>,
     list_devices(direction).map_err(|error| error.to_string())
 }
 
-/// Switches the output device (`None` = system default), saves the choice in
-/// settings and returns the new status.
+/// Why choosing an output failed. The choice is in effect either way.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "code", rename_all = "camelCase")]
+pub enum OutputSelectError {
+    /// The device could not be opened; the system default plays meanwhile
+    /// and the device is retried.
+    OpenFailed { message: String },
+    /// The output switched but the choice could not be saved to disk.
+    SaveFailed { message: String },
+    /// The output manager did not answer.
+    Unavailable,
+}
+
+/// Asks the output manager to switch to `device_id` (`None` = system
+/// default) and to save the choice; returns the new status.
 #[tauri::command]
 pub fn audio_set_output_device(
-    app: AppHandle,
     audio: State<'_, AudioService>,
-    settings: State<'_, SettingsStore>,
     device_id: Option<String>,
-) -> Result<AudioStatus, String> {
-    {
-        let mut engine = lock(audio.engine());
-        engine
-            .open_output(&OutputRequest {
-                device_id: device_id.clone(),
-                target_buffer_frames: TARGET_BUFFER_FRAMES,
-            })
-            .map_err(|error| error.to_string())?;
-        // Persist before releasing the engine, so the device watcher never
-        // sees the new stream with the old preference and switches back.
-        let mut saved = settings.get();
-        saved.output_device_id = device_id;
-        settings.save(saved).map_err(|error| error.to_string())?;
-        announce_output(&app, &engine);
+) -> Result<AudioStatus, OutputSelectError> {
+    let (reply, response) = mpsc::channel();
+    audio
+        .requests
+        .send(ManagerRequest::Select { device_id, reply })
+        .map_err(|_| OutputSelectError::Unavailable)?;
+    match response.recv_timeout(SELECT_TIMEOUT) {
+        Ok(Ok(())) => Ok(audio.status()),
+        Ok(Err(SelectError::OpenFailed(message))) => Err(OutputSelectError::OpenFailed { message }),
+        Ok(Err(SelectError::SaveFailed(message))) => Err(OutputSelectError::SaveFailed { message }),
+        Err(_) => Err(OutputSelectError::Unavailable),
     }
-    log_latency_when_ready(Arc::clone(audio.engine()));
-    Ok(audio.status())
 }
 
 /// Registers a channel that receives every rendered `notify` event.
