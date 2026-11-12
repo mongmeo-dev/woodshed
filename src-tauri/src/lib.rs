@@ -13,16 +13,20 @@ fn settings_load(store: State<'_, SettingsStore>) -> Settings {
 }
 
 #[tauri::command]
-fn settings_save(
-    store: State<'_, SettingsStore>,
-    mut settings: Settings,
-) -> Result<Settings, String> {
-    // The output device belongs to the audio output manager
-    // (`audio_set_output_device`); a save from the screen never changes it.
-    settings.output_device_id = store.get().output_device_id;
-    // Tuner choices belong to the tuner commands (`tuner_select_input`, ...).
-    settings.tuner = store.get().tuner;
-    store.save(settings).map_err(|error| error.to_string())
+fn settings_save(store: State<'_, SettingsStore>, settings: Settings) -> Result<Settings, String> {
+    store
+        .update(|current| {
+            // The output device belongs to the audio output manager
+            // (`audio_set_output_device`) and tuner choices to the tuner
+            // commands (`tuner_select_input`, ...): a save from the screen
+            // never changes them.
+            let output_device_id = current.output_device_id.take();
+            let tuner = std::mem::take(&mut current.tuner);
+            *current = settings;
+            current.output_device_id = output_device_id;
+            current.tuner = tuner;
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

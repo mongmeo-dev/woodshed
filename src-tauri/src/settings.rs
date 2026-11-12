@@ -73,20 +73,39 @@ impl SettingsStore {
             .clone()
     }
 
-    /// Writes atomically (temp file + rename) and updates the cached copy.
+    /// Changes the settings in one step: under a single lock it takes the
+    /// current value, applies `change`, writes the file (temp file + rename)
+    /// and updates the cached copy. Every writer changes only its own fields
+    /// this way, so concurrent owners (the screen, the output manager, the
+    /// tuner) never undo each other. If writing fails, nothing changes.
+    pub fn update(&self, change: impl FnOnce(&mut Settings)) -> io::Result<Settings> {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut next = current.clone();
+        change(&mut next);
+        self.write(&next)?;
+        *current = next.clone();
+        Ok(next)
+    }
+
+    /// Replaces every field. Prefer [`SettingsStore::update`].
     pub fn save(&self, settings: Settings) -> io::Result<Settings> {
+        self.update(|current| *current = settings)
+    }
+
+    fn write(&self, settings: &Settings) -> io::Result<()> {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(&settings).map_err(io::Error::other)?;
-        let temp = self.path.with_extension("json.tmp");
+        let text = serde_json::to_string_pretty(settings).map_err(io::Error::other)?;
+        // Per process: several app builds may share the data directory.
+        let temp = self
+            .path
+            .with_extension(format!("json.{}.tmp", std::process::id()));
         fs::write(&temp, text)?;
-        fs::rename(&temp, &self.path)?;
-        *self
-            .current
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = settings.clone();
-        Ok(settings)
+        fs::rename(&temp, &self.path)
     }
 }
 
@@ -140,6 +159,58 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();
         assert_eq!(SettingsStore::load(&dir).get(), Settings::default());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_owners_keep_each_others_changes() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = temp_dir("concurrent");
+        let store = Arc::new(SettingsStore::load(&dir));
+        store
+            .update(|s| {
+                s.language = Some(Language::En);
+                s.theme = Theme::Dark;
+            })
+            .unwrap();
+        const ROUNDS: u16 = 200;
+        let barrier = Arc::new(Barrier::new(2));
+        let tuner = {
+            let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+            std::thread::spawn(move || {
+                for round in 0..ROUNDS {
+                    barrier.wait();
+                    store
+                        .update(|s| s.tuner.reference_hz = 430 + round % 21)
+                        .unwrap();
+                }
+            })
+        };
+        let output = {
+            let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+            std::thread::spawn(move || {
+                for round in 0..ROUNDS {
+                    barrier.wait();
+                    store
+                        .update(|s| s.output_device_id = Some(format!("coreaudio:dev{round}")))
+                        .unwrap();
+                }
+            })
+        };
+        tuner.join().unwrap();
+        output.join().unwrap();
+
+        let last = ROUNDS - 1;
+        for settings in [store.get(), SettingsStore::load(&dir).get()] {
+            assert_eq!(settings.tuner.reference_hz, 430 + last % 21);
+            assert_eq!(
+                settings.output_device_id.as_deref(),
+                Some(format!("coreaudio:dev{last}").as_str())
+            );
+            assert_eq!(settings.language, Some(Language::En));
+            assert_eq!(settings.theme, Theme::Dark);
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }
