@@ -397,35 +397,9 @@ export function DrumMachineScreen() {
               onChange={(unit) => edit((current) => setSwingUnit(current, unit))}
             />
           </div>
-
-          <div className="drum-field">
-            <span className="drum-field-label" aria-hidden="true">
-              {t("drumMachine.length")}
-            </span>
-            <SegmentedControl
-              label={t("drumMachine.length")}
-              options={lengthOptions}
-              value={String(pattern.length) as `${PatternLength}`}
-              onChange={(value) =>
-                edit((current) => setLength(current, Number(value) as PatternLength))
-              }
-            />
-          </div>
         </div>
 
         <div className="drum-toolbar">
-          <div className="drum-field">
-            <span className="drum-field-label" aria-hidden="true">
-              {t("drumMachine.velocity")}
-            </span>
-            <SegmentedControl
-              label={t("drumMachine.velocity")}
-              options={velocityOptions}
-              value={String(paintLevel) as "1" | "2" | "3"}
-              onChange={(value) => setPaintLevel(Number(value) as PaintLevel)}
-            />
-          </div>
-
           <div className="drum-field">
             <label className="drum-field-label" htmlFor="drum-preset">
               {t("drumMachine.preset")}
@@ -544,6 +518,34 @@ export function DrumMachineScreen() {
             )}
           </div>
         )}
+
+        <div className="drum-toolbar">
+          <div className="drum-field">
+            <span className="drum-field-label" aria-hidden="true">
+              {t("drumMachine.length")}
+            </span>
+            <SegmentedControl
+              label={t("drumMachine.length")}
+              options={lengthOptions}
+              value={String(pattern.length) as `${PatternLength}`}
+              onChange={(value) =>
+                edit((current) => setLength(current, Number(value) as PatternLength))
+              }
+            />
+          </div>
+
+          <div className="drum-field">
+            <span className="drum-field-label" aria-hidden="true">
+              {t("drumMachine.velocity")}
+            </span>
+            <SegmentedControl
+              label={t("drumMachine.velocity")}
+              options={velocityOptions}
+              value={String(paintLevel) as "1" | "2" | "3"}
+              onChange={(value) => setPaintLevel(Number(value) as PaintLevel)}
+            />
+          </div>
+        </div>
 
         <div className="drum-grid">
           <div className="drum-row drum-ruler" aria-hidden="true">
