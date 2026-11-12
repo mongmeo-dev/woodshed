@@ -6,13 +6,16 @@
 //! - [`DrumSource`]: the engine [`crate::audio::Source`] that plays them.
 //! - [`Sequencer`]: schedules a [`Pattern`]'s hits sample-accurately and
 //!   reschedules on edits and output changes without stopping.
+//! - [`DrumService`]: Tauri state, scheduler thread, step channel, storage.
 
 mod announce;
 mod kit;
 mod pattern;
 mod resample;
 mod sequencer;
+pub mod service;
 mod source;
+mod store;
 mod wav;
 
 #[cfg(test)]
@@ -26,5 +29,7 @@ pub use pattern::{
 };
 pub use resample::resample;
 pub use sequencer::{ScheduledStep, Sequencer};
+pub use service::{DrumService, DrumState, PatternStoreError};
 pub use source::DrumSource;
+pub use store::{PatternStore, SavedPattern};
 pub use wav::{Decoded, WavError, decode_wav};
