@@ -9,7 +9,7 @@ import {
   SINGLE_MARKER_FRETS,
 } from "../../lib/theory";
 import { SegmentedControl } from "../../shell/SegmentedControl";
-import { buildBoard } from "./board";
+import { type BoardMarker, type BoardString, buildBoard } from "./board";
 import "./fretboard.css";
 import {
   type DisplayMode,
@@ -47,8 +47,16 @@ export function FretboardScreen() {
     [prefs.instrument, prefs.key, prefs.scale, prefs.frets, prefs.display],
   );
   const frets = Array.from({ length: prefs.frets + 1 }, (_, fret) => fret);
-  const markerLabel = (note: string, root: boolean) =>
-    root ? `${displayName(note)} ${t("fretboard.root")}` : displayName(note);
+  /** Where the marker sits and what it is, so identical notes on other strings and frets differ. */
+  const markerLabel = (string: BoardString, fret: number, marker: BoardMarker) =>
+    [
+      t("fretboard.marker.position", { string: string.number, fret }),
+      displayName(marker.note),
+      ...(prefs.display === "intervals"
+        ? [t("fretboard.marker.degree", { interval: displayName(marker.interval) })]
+        : []),
+      ...(marker.root ? [t("fretboard.root")] : []),
+    ].join(", ");
   const rootName = displayName(board.scale.notes[0]?.name ?? "");
   const boardStyle = {
     "--frets": prefs.frets,
@@ -151,7 +159,12 @@ export function FretboardScreen() {
           </div>
 
           <div className="card fretboard-card">
-            <div className="fretboard-scroll">
+            <section
+              className="fretboard-scroll"
+              aria-label={t("fretboard.scroll")}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container must take focus for the arrow keys to scroll it.
+              tabIndex={0}
+            >
               <figure
                 className="fretboard"
                 dir={prefs.leftHanded ? "rtl" : "ltr"}
@@ -189,7 +202,7 @@ export function FretboardScreen() {
                               data-note={marker.note}
                               data-interval={marker.interval}
                               role="img"
-                              aria-label={markerLabel(marker.note, marker.root)}
+                              aria-label={markerLabel(string, fret, marker)}
                             >
                               {displayName(marker.label)}
                             </span>
@@ -208,7 +221,7 @@ export function FretboardScreen() {
                   ))}
                 </div>
               </figure>
-            </div>
+            </section>
           </div>
 
           <section className="scale-readout" aria-labelledby="fretboard-scale-title">

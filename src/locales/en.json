@@ -12,7 +12,12 @@
   },
   "fretboard": {
     "board": "Fretboard",
+    "scroll": "Fretboard Scroll",
     "root": "Root",
+    "marker": {
+      "position": "String {{string}}, Fret {{fret}}",
+      "degree": "Degree {{interval}}"
+    },
     "instrument": {
       "label": "Instrument",
       "guitar6": "6-String Guitar",

@@ -24,6 +24,18 @@ function markerLabels(): string[] {
   return Array.from(document.querySelectorAll(".marker")).map((el) => el.textContent ?? "");
 }
 
+/** Accessible name of the marker at `row` (0 = top string) and `fret`; empty when there is none. */
+function markerAt(row: number, fret: number): string {
+  const cell = document.querySelectorAll(".string-row")[row]?.querySelectorAll(".fret-cell")[fret];
+  return cell?.querySelector(".marker")?.getAttribute("aria-label") ?? "";
+}
+
+function markerNames(): string[] {
+  return Array.from(document.querySelectorAll(".marker")).map(
+    (el) => el.getAttribute("aria-label") ?? "",
+  );
+}
+
 beforeEach(async () => {
   localStorage.clear();
   await i18n.changeLanguage("en");
@@ -129,4 +141,87 @@ test("unreadable stored choices fall back to the defaults", () => {
   render(<FretboardScreen />);
   expect(stringNames()).toEqual(["E", "B", "G", "D", "A", "E"]);
   expect(screen.getByRole("heading", { name: "C Major" })).toBeTruthy();
+});
+
+describe("accessible names", () => {
+  test("the same note in different places has different names", () => {
+    render(<FretboardScreen />);
+    // Guitar in C major: the high and low E strings, open and at the 12th fret.
+    expect(markerAt(0, 0)).toBe("String 1, Fret 0, E");
+    expect(markerAt(0, 12)).toBe("String 1, Fret 12, E");
+    expect(markerAt(5, 0)).toBe("String 6, Fret 0, E");
+    expect(markerAt(5, 12)).toBe("String 6, Fret 12, E");
+    // The root closes the name.
+    expect(markerAt(1, 1)).toBe("String 2, Fret 1, C, Root");
+    expect(markerAt(4, 3)).toBe("String 5, Fret 3, C, Root");
+  });
+
+  test("no two markers share a name, on every instrument and at 24 frets", () => {
+    render(<FretboardScreen />);
+    fireEvent.click(screen.getByRole("radio", { name: "24" }));
+    for (const instrument of ["6-String Guitar", "4-String Bass", "5-String Bass"]) {
+      fireEvent.click(screen.getByRole("radio", { name: instrument }));
+      for (const mode of ["Note Names", "Intervals"]) {
+        fireEvent.click(screen.getByRole("radio", { name: mode }));
+        const names = markerNames();
+        expect(names.length).toBeGreaterThan(0);
+        expect(names.every((name) => name !== "")).toBe(true);
+        expect(new Set(names).size).toBe(names.length);
+      }
+    }
+  });
+
+  test("intervals mode adds the degree to the name", () => {
+    render(<FretboardScreen />);
+    fireEvent.click(screen.getByRole("radio", { name: "Intervals" }));
+    expect(markerAt(0, 0)).toBe("String 1, Fret 0, E, Degree 3");
+    expect(markerAt(1, 1)).toBe("String 2, Fret 1, C, Degree 1, Root");
+
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("Scale"), { target: { value: "minorPentatonic" } });
+    // A minor pentatonic on the low E string: fret 8 is C, the ♭3.
+    expect(markerAt(5, 8)).toBe("String 6, Fret 8, C, Degree ♭3");
+    expect(markerAt(5, 5)).toBe("String 6, Fret 5, A, Degree 1, Root");
+  });
+
+  test("string numbers count from the highest string on every instrument", () => {
+    render(<FretboardScreen />);
+    fireEvent.click(screen.getByRole("radio", { name: "4-String Bass" }));
+    expect(markerAt(0, 0)).toBe("String 1, Fret 0, G");
+    expect(markerAt(3, 0)).toBe("String 4, Fret 0, E");
+    fireEvent.click(screen.getByRole("radio", { name: "5-String Bass" }));
+    expect(markerAt(0, 0)).toBe("String 1, Fret 0, G");
+    expect(markerAt(4, 0)).toBe("String 5, Fret 0, B");
+  });
+
+  test("the names are translated", async () => {
+    await i18n.changeLanguage("ko");
+    render(<FretboardScreen />);
+    expect(markerAt(0, 0)).toBe("1번 줄 0프렛, E");
+    expect(markerAt(5, 12)).toBe("6번 줄 12프렛, E");
+    expect(markerAt(1, 1)).toBe("2번 줄 1프렛, C, 루트");
+    fireEvent.click(screen.getByRole("radio", { name: "음정" }));
+    expect(markerAt(0, 0)).toBe("1번 줄 0프렛, E, 도수 3");
+  });
+});
+
+describe("keyboard scrolling", () => {
+  test("the scrolling board takes focus, also at 24 frets", () => {
+    render(<FretboardScreen />);
+    const board = screen.getByRole("figure", { name: "Fretboard" });
+    for (const frets of ["15", "24"]) {
+      fireEvent.click(screen.getByRole("radio", { name: frets }));
+      const region = screen.getByRole("region", { name: "Fretboard Scroll" });
+      expect(region.tabIndex).toBe(0);
+      expect(region.contains(board)).toBe(true);
+      region.focus();
+      expect(document.activeElement).toBe(region);
+    }
+  });
+
+  test("the focusable region is named in Korean too", async () => {
+    await i18n.changeLanguage("ko");
+    render(<FretboardScreen />);
+    expect(screen.getByRole("region", { name: "지판 스크롤" }).tabIndex).toBe(0);
+  });
 });
