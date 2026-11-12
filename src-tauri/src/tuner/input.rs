@@ -158,21 +158,31 @@ impl<E: InputEnv> InputSupervisor<E> {
 
     /// The device list changed (`audio://devices-changed`).
     pub fn devices_changed(&mut self, now: Instant) {
-        self.devices = self.env.devices();
+        let before = std::mem::replace(&mut self.devices, self.env.devices());
         let Some(opened) = self.opened() else {
             self.reopen(now);
             return;
         };
-        let current_gone = self.devices.find(&opened.device_id).is_none();
-        let preferred_back = self.fallback
+        let opened_id = opened.device_id.clone();
+        if self.devices.find(&opened_id).is_none() {
+            self.reopen(now);
+            return;
+        }
+        // The chosen device came (back): use it. One that stayed listed but
+        // failed to open is retried on its own schedule (`tick`).
+        let preferred_returned = self.fallback
             && self
                 .preferred
                 .as_deref()
-                .is_some_and(|id| self.devices.find(id).is_some());
-        let default_moved = self.preferred.is_none()
-            && self.devices.default.as_deref() != Some(opened.device_id.as_str());
-        if current_gone || preferred_back || default_moved {
+                .is_some_and(|id| self.devices.find(id).is_some() && before.find(id).is_none());
+        if preferred_returned {
             self.reopen(now);
+            return;
+        }
+        // On the system default (by choice or as a fallback): follow it.
+        let on_default = self.preferred.is_none() || self.fallback;
+        if on_default && self.devices.default.as_deref() != Some(opened_id.as_str()) {
+            self.open_default(now);
         }
     }
 
@@ -203,6 +213,18 @@ impl<E: InputEnv> InputSupervisor<E> {
             } else {
                 self.preferred_retry_at = None;
             }
+        }
+    }
+
+    /// Moves to the current system default, keeping the fallback state and
+    /// the schedule for retrying the chosen device.
+    fn open_default(&mut self, now: Instant) {
+        self.capture = None;
+        self.retry_at = None;
+        let channels = self.devices.default_device().map_or(1, |d| d.channels);
+        let channel = fit_channel(self.channel, channels);
+        if !self.try_open(None, channel) {
+            self.retry_at = Some(now + RETRY_INTERVAL);
         }
     }
 
@@ -471,5 +493,60 @@ mod tests {
         supervisor.select(now, None, InputChannel::MixDown);
         assert_eq!(opened_id(&supervisor), Some(MIC));
         assert_eq!(supervisor.preferred(), None);
+    }
+
+    #[test]
+    fn a_fallback_follows_the_system_default() {
+        const OTHER: &str = "coreaudio:other";
+        let now = Instant::now();
+        let env = FakeEnv::with(&[(MIC, 1), (OTHER, 2)], MIC);
+        // The chosen interface is not plugged in: the default mic plays.
+        let mut supervisor = InputSupervisor::new(env, Some(IFACE.into()), InputChannel::Single(1));
+        supervisor.start(now);
+        assert_eq!(opened_id(&supervisor), Some(MIC));
+        assert!(supervisor.is_fallback());
+
+        // The system default moves to another device; the mic stays.
+        supervisor.env.devices.default = Some(OTHER.into());
+        supervisor.devices_changed(now);
+        assert_eq!(opened_id(&supervisor), Some(OTHER));
+        assert!(supervisor.is_fallback());
+        assert_eq!(supervisor.preferred(), Some(IFACE), "choice kept");
+        assert_eq!(supervisor.channel(), InputChannel::Single(1), "choice kept");
+        assert_eq!(
+            supervisor.opened().unwrap().channel,
+            InputChannel::Single(1),
+            "the new default has a second channel"
+        );
+
+        // The interface arrives: back to it.
+        supervisor.env.devices.devices.push(ListedInput {
+            id: IFACE.into(),
+            channels: 4,
+        });
+        supervisor.devices_changed(now);
+        assert_eq!(opened_id(&supervisor), Some(IFACE));
+        assert!(!supervisor.is_fallback());
+    }
+
+    #[test]
+    fn a_healthy_fallback_is_not_reopened_by_unrelated_changes() {
+        let now = Instant::now();
+        let mut env = FakeEnv::with(&[(MIC, 1), (IFACE, 2)], MIC);
+        // Listed but failing: the retry schedule handles it, not list changes.
+        env.broken.push(IFACE.into());
+        let mut supervisor = InputSupervisor::new(env, Some(IFACE.into()), InputChannel::Single(1));
+        supervisor.start(now);
+        assert!(supervisor.is_fallback());
+        let generation = supervisor.generation();
+        let attempts = supervisor.env.opens.len();
+
+        supervisor.env.devices.devices.push(ListedInput {
+            id: "coreaudio:other".into(),
+            channels: 2,
+        });
+        supervisor.devices_changed(now);
+        assert_eq!(supervisor.generation(), generation, "no reopen");
+        assert_eq!(supervisor.env.opens.len(), attempts, "no open attempt");
     }
 }
