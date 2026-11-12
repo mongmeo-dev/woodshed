@@ -13,21 +13,16 @@ use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
 
-use crate::audio::{AudioEngine, EngineError, EngineHandle};
+use crate::audio::{AudioEngine, EngineError};
 
-use super::announce::{Announcer, HeardClock, StepEvent};
+use super::announce::StepEvent;
+use super::control::DrumControl;
 use super::kit::Kit;
 use super::pattern::Pattern;
-use super::sequencer::{ScheduledStep, Sequencer};
+use super::sequencer::Sequencer;
 use super::source::DrumSource;
 use super::store::{PatternStore, SavedPattern, StoreError};
 
-/// How far ahead of the audio thread playback starts.
-const START_LEAD_SECS: f64 = 0.025;
-/// How far ahead of the audio thread a change takes effect while playing.
-const EDIT_LEAD_SECS: f64 = 0.02;
-/// How far ahead steps are kept scheduled.
-const LOOKAHEAD_SECS: f64 = 0.12;
 /// How often the scheduler thread tops up the schedule while playing.
 const TICK: Duration = Duration::from_millis(10);
 /// Edits within this window are written to disk once.
@@ -48,18 +43,12 @@ pub struct DrumState {
 }
 
 struct Inner {
-    sequencer: Sequencer,
-    announcer: Announcer,
+    control: DrumControl,
     /// The screen's step channel and its subscription token.
     channel: Option<(u64, Channel<StepEvent>)>,
 }
 
 impl Inner {
-    fn announce_all(&mut self, clock: &impl HeardClock, outbox: &mut Vec<StepEvent>) {
-        let steps: Vec<ScheduledStep> = self.sequencer.scheduled().copied().collect();
-        self.announcer.announce_all(clock, steps, outbox);
-    }
-
     fn send(&mut self, outbox: Vec<StepEvent>) {
         let Some((_, channel)) = &self.channel else {
             return;
@@ -71,41 +60,6 @@ impl Inner {
             }
         }
     }
-
-    /// One scheduler tick: follow an output change, then top up the schedule.
-    fn tick(
-        &mut self,
-        engine: &mut AudioEngine,
-        outbox: &mut Vec<StepEvent>,
-    ) -> Result<(), EngineError> {
-        let handle = engine.handle();
-        let output_changed = handle.generation() != self.sequencer.generation();
-        if output_changed {
-            let from = handle.frame_after(EDIT_LEAD_SECS);
-            self.sequencer.retime(handle, from)?;
-        }
-        let added = fill(&mut self.sequencer, handle)?;
-        if output_changed {
-            // Every announced time belongs to the old output: send them again.
-            self.announce_all(&*engine, outbox);
-        } else {
-            let mut fresh: Vec<ScheduledStep> = self
-                .sequencer
-                .scheduled()
-                .rev()
-                .take(added)
-                .copied()
-                .collect();
-            fresh.reverse();
-            self.announcer.announce(&*engine, fresh, outbox);
-        }
-        Ok(())
-    }
-}
-
-fn fill(sequencer: &mut Sequencer, handle: &mut EngineHandle) -> Result<usize, EngineError> {
-    let until = handle.frame_after(LOOKAHEAD_SECS);
-    sequencer.fill(handle, until)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -146,8 +100,7 @@ impl DrumService {
         }
 
         let inner = Arc::new(Mutex::new(Inner {
-            sequencer: Sequencer::new(source, pattern),
-            announcer: Announcer::default(),
+            control: DrumControl::new(Sequencer::new(source, pattern)),
             channel: None,
         }));
         let (wake, wakes) = mpsc::channel();
@@ -166,35 +119,22 @@ impl DrumService {
     pub fn state(&self) -> DrumState {
         let inner = lock(&self.inner);
         DrumState {
-            playing: inner.sequencer.is_playing(),
-            pattern: inner.sequencer.pattern().clone(),
+            playing: inner.control.sequencer().is_playing(),
+            pattern: inner.control.sequencer().pattern().clone(),
             saved: self.store.saved(),
         }
     }
 
     pub fn set_playing(&self, playing: bool) -> Result<bool, EngineError> {
         let mut inner = lock(&self.inner);
-        if inner.sequencer.is_playing() == playing {
-            return Ok(playing);
-        }
         let mut outbox = Vec::new();
-        {
-            let mut engine = lock(&self.engine);
-            let handle = engine.handle();
-            if playing {
-                let at = handle.frame_after(START_LEAD_SECS);
-                inner.sequencer.start(handle, at)?;
-                fill(&mut inner.sequencer, handle)?;
-                inner.announce_all(&*engine, &mut outbox);
-            } else {
-                inner.sequencer.stop(handle)?;
-                inner.announcer.clear(0, &mut outbox);
-            }
-        }
+        let result = inner
+            .control
+            .set_playing(&mut *lock(&self.engine), playing, &mut outbox);
         inner.send(outbox);
         drop(inner);
         let _ = self.wake.send(());
-        Ok(playing)
+        result.map(|()| playing)
     }
 
     /// Applies an edited pattern; while playing it is heard from a moment
@@ -203,24 +143,12 @@ impl DrumService {
         let pattern = pattern.normalized();
         let mut inner = lock(&self.inner);
         let mut outbox = Vec::new();
-        {
-            let mut engine = lock(&self.engine);
-            let handle = engine.handle();
-            let from = handle.frame_after(EDIT_LEAD_SECS);
-            inner.sequencer.set_pattern(handle, pattern.clone(), from)?;
-            if inner.sequencer.is_playing() {
-                fill(&mut inner.sequencer, handle)?;
-                let rescheduled: Vec<ScheduledStep> = inner
-                    .sequencer
-                    .scheduled()
-                    .filter(|step| step.frame >= from)
-                    .copied()
-                    .collect();
-                inner.announcer.clear(from, &mut outbox);
-                inner.announcer.announce(&*engine, rescheduled, &mut outbox);
-            }
-        }
+        let result =
+            inner
+                .control
+                .set_pattern(&mut *lock(&self.engine), pattern.clone(), &mut outbox);
         inner.send(outbox);
+        result?;
         let _ = self.persist.send(pattern.clone());
         Ok(pattern)
     }
@@ -240,11 +168,13 @@ impl DrumService {
         }
         inner.channel = Some((token, channel));
         let mut outbox = Vec::new();
-        {
-            let engine = lock(&self.engine);
-            inner.announce_all(&*engine, &mut outbox);
-        }
+        let result = inner
+            .control
+            .announce_all(&mut *lock(&self.engine), &mut outbox);
         inner.send(outbox);
+        if let Err(error) = result {
+            log::warn!("drum step channel: {error}");
+        }
     }
 
     pub fn save_named(
@@ -269,7 +199,7 @@ fn spawn_scheduler(
         .name("drums-scheduler".into())
         .spawn(move || {
             loop {
-                let playing = lock(&inner).sequencer.is_playing();
+                let playing = lock(&inner).control.sequencer().is_playing();
                 let woke = if playing {
                     wakes.recv_timeout(TICK)
                 } else {
@@ -279,11 +209,11 @@ fn spawn_scheduler(
                     return;
                 }
                 let mut inner = lock(&inner);
-                if !inner.sequencer.is_playing() {
+                if !inner.control.sequencer().is_playing() {
                     continue;
                 }
                 let mut outbox = Vec::new();
-                let result = inner.tick(&mut lock(&engine), &mut outbox);
+                let result = inner.control.tick(&mut *lock(&engine), &mut outbox);
                 if let Err(error) = result {
                     log::warn!("drum scheduler: {error}");
                 }

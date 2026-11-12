@@ -112,7 +112,8 @@ impl Sequencer {
 
     /// Replaces the pattern. While playing, events from `from` on are
     /// rescheduled with it (`from` must be ahead of the audio thread); call
-    /// [`Self::fill`] afterwards.
+    /// [`Self::fill`] afterwards. It keeps the output generation: follow an
+    /// output change with [`Self::retime`] (it compares generations).
     pub fn set_pattern(
         &mut self,
         handle: &mut EngineHandle,
@@ -129,11 +130,11 @@ impl Sequencer {
     /// Re-anchors the schedule after the output changed: cancels from `from`
     /// and continues at the new sample rate. Call [`Self::fill`] afterwards.
     pub fn retime(&mut self, handle: &mut EngineHandle, from: FramePos) -> Result<(), EngineError> {
-        if !self.playing {
-            self.generation = handle.generation();
-            return Ok(());
+        if self.playing {
+            self.reschedule(handle, from, |_| {})?;
         }
-        self.reschedule(handle, from, |_| {})
+        self.generation = handle.generation();
+        Ok(())
     }
 
     /// Schedules every step that starts before frame `until` and returns how
@@ -217,7 +218,6 @@ impl Sequencer {
         self.anchor_position = position;
         self.frames_per_step = self.pattern.frames_per_step(handle.format().sample_rate);
         self.floor = from;
-        self.generation = handle.generation();
         self.send_gains(handle, from)
     }
 
