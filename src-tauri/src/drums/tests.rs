@@ -540,3 +540,34 @@ fn the_bundled_kit_plays_at_any_output_rate() {
         }
     }
 }
+
+#[test]
+fn less_swing_while_playing_plays_a_step_moved_behind_the_edit_point_once() {
+    // 120 BPM: a sixteenth is 6 000 frames. At 75% eighth swing the steps of
+    // a beat sit at 0, 1.5, 3.0 and 3.5 sixteenths; straight they are 0–3.
+    let rate = 48_000;
+    let hats: &[(Track, &[usize])] = &[(Track::ClosedHat, &[0, 1, 2, 3, 4, 5, 6, 7])];
+    let mut rig = Rig::new(
+        rate,
+        impulse_kit(rate),
+        pattern(16, 120, 75, SwingUnit::Eighth, hats),
+    );
+    rig.start(0);
+    rig.run(18_000);
+    // Rescheduling at 3.2 sixteenths: step 3 (was 3.5) now belongs at 3.0,
+    // just behind the point, so it plays at the point instead of vanishing.
+    let from = rig.rendered() + 1_200;
+    rig.sequencer
+        .set_pattern(
+            &mut rig.engine.handle,
+            pattern(16, 120, 50, SwingUnit::Eighth, hats),
+            from,
+        )
+        .unwrap();
+    rig.run(32_000);
+    let frames: Vec<FramePos> = rig.hits().keys().copied().collect();
+    assert_eq!(
+        frames,
+        vec![0, 9_000, 18_000, 19_200, 24_000, 30_000, 36_000, 42_000]
+    );
+}
