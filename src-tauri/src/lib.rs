@@ -1,6 +1,7 @@
 pub mod app_audio;
 pub mod audio;
 pub mod drums;
+pub mod metronome;
 pub mod settings;
 pub mod tuner;
 
@@ -48,8 +49,10 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            let metronome = metronome::MetronomeService::start(&data_dir, &audio);
             let drums = drums::DrumService::start(audio.engine(), &data_dir)?;
             app.manage(audio);
+            app.manage(metronome);
             app.manage(drums);
             let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
             app.manage(tuner);
@@ -64,6 +67,13 @@ pub fn run() {
             app_audio::audio_subscribe,
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
+            metronome::service::metronome_load,
+            metronome::service::metronome_subscribe,
+            metronome::service::metronome_start,
+            metronome::service::metronome_update,
+            metronome::service::metronome_stop,
+            metronome::service::metronome_save_preset,
+            metronome::service::metronome_delete_preset,
             tuner::service::tuner_start,
             tuner::service::tuner_stop,
             tuner::service::tuner_select_input,
