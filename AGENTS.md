@@ -8,7 +8,7 @@
 - 커밋·push 전에 `mise run check`를 통과시킵니다. 내용: `biome check` → `tsc --noEmit` → `vitest run --maxWorkers=2` → `cargo fmt --check` → `cargo clippy --all-targets --locked -D warnings` → `cargo test --locked`.
   - 웹만: `mise run check:web`, Rust만: `mise run check:rust`.
 - 이 Mac은 다른 프로젝트와 공유합니다. 무거운 명령(빌드·전체 검사)은 한 번에 하나만 돌리고, `CARGO_BUILD_JOBS=4`(mise env에 설정됨), vitest는 `--maxWorkers=2`를 씁니다. 개발 서버·빌드한 앱은 확인 후 종료합니다.
-- 앱 빌드: `mise exec -- pnpm tauri build` → `src-tauri/target/release/bundle/macos/Woodshed.app`.
+- 앱 빌드: `mise run app`(`scripts/build-app.sh`: 로컬 서명 인증서가 있으면 그것으로, 없으면 ad-hoc 서명) → `src-tauri/target/release/bundle/macos/Woodshed.app`. 인증서는 `mise run signing-cert`로 만들며 운영자 키체인 검색 목록을 바꾸므로 운영자 확인 뒤에만 실행합니다(README 로컬 서명).
 - 실제 출력 장치 레이턴시 확인: `cd src-tauri && mise exec -- cargo run --release --example latency_probe` (스피커로 짧은 클릭음이 납니다).
 
 ## 화면 문구 규칙

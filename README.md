@@ -24,9 +24,25 @@ mise exec -- pnpm tauri dev
 ## 빌드
 
 ```sh
-mise exec -- pnpm tauri build
+mise run app   # = sh scripts/build-app.sh
 # → src-tauri/target/release/bundle/macos/Woodshed.app
 ```
+
+### 로컬 서명 (마이크 권한 유지)
+
+로컬 빌드는 기본으로 ad-hoc 서명이라, 다시 빌드할 때마다 macOS가 다른 앱으로 보고 마이크 권한 창을 다시 띄웁니다. 자체 서명 인증서를 한 번 만들어 두면 다시 빌드해도 권한이 유지됩니다.
+
+```sh
+mise run signing-cert   # = sh scripts/create-local-signing-cert.sh
+```
+
+- 인증서 "Woodshed Local Signing"은 전용 키체인 `~/Library/Keychains/woodshed-local-signing.keychain-db`에 들어가고, 이 키체인은 사용자 키체인 검색 목록에 추가됩니다. 키체인 암호는 `~/Library/Application Support/woodshed-local-signing/`에 둡니다. 로그인 키체인은 건드리지 않습니다.
+- `mise run app`은 이 인증서가 있으면 그것으로 서명하고(hardened runtime 없이, `src-tauri/tauri.local-signing.conf.json`), 없으면 ad-hoc으로 빌드합니다. `mise run check`와 테스트는 인증서와 상관없습니다.
+- 지우기: `sh scripts/create-local-signing-cert.sh --remove`. 배포 빌드는 Developer ID로 따로 서명합니다.
+
+### 첫 실행과 마이크 권한
+
+마이크 권한이 아직 정해지지 않았고 기본 출력 장치에 입력이 있으면(오디오 인터페이스 등), macOS는 권한 창에 답할 때까지 출력 스트림을 만들지 않습니다. 앱은 이때 권한 창을 띄우고, 답하는 즉시 출력을 엽니다(`AGENTS.md`의 출력 관리자). 첫 실행 조건은 `tccutil reset Microphone dev.mongmeo.woodshed`로 다시 만들 수 있습니다.
 
 ### 스템 분리용 sidecar (yt-dlp, ffmpeg)
 
@@ -79,7 +95,7 @@ mise run check:rust   # Rust만
 cd src-tauri && mise exec -- cargo run --release --example latency_probe
 ```
 
-앱도 시작할 때와 출력 장치를 바꿀 때 실측 출력 레이턴시를 로그에 남깁니다(`~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`).
+앱도 시작할 때와 출력 장치를 바꿀 때 실측 출력 레이턴시를 로그에 남깁니다(`~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`). 같은 로그의 `startup:` 줄은 시작 단계별 시각(`run()` 시작 기준 ms와 epoch ms)입니다.
 
 ## 디자인
 
