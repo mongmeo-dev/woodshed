@@ -12,6 +12,11 @@
     "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
     sans-serif;
 
+  /* hero-display: 56 / 600 / 1.07 / -0.28px (tuner note) */
+  --ws-type-hero-size: 56px;
+  --ws-type-hero-weight: 600;
+  --ws-type-hero-leading: 1.07;
+  --ws-type-hero-tracking: -0.28px;
   /* display-md: 34 / 600 / 1.47 / -0.374px (line-height tightened for single-line titles) */
   --ws-type-title-size: 34px;
   --ws-type-title-weight: 600;

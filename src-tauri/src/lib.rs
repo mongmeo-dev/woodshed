@@ -2,25 +2,38 @@ pub mod app_audio;
 pub mod audio;
 pub mod drums;
 pub mod settings;
+pub mod tuner;
 
 use tauri::{Manager, State};
 
 use settings::{Settings, SettingsStore};
 
+// Async so they never run on the webview's IPC (main) thread; a save writes
+// a file.
+
 #[tauri::command]
-fn settings_load(store: State<'_, SettingsStore>) -> Settings {
-    store.get()
+async fn settings_load(store: State<'_, SettingsStore>) -> Result<Settings, String> {
+    Ok(store.get())
 }
 
 #[tauri::command]
-fn settings_save(
+async fn settings_save(
     store: State<'_, SettingsStore>,
-    mut settings: Settings,
+    settings: Settings,
 ) -> Result<Settings, String> {
-    // The output device belongs to the audio output manager
-    // (`audio_set_output_device`); a save from the screen never changes it.
-    settings.output_device_id = store.get().output_device_id;
-    store.save(settings).map_err(|error| error.to_string())
+    store
+        .update(|current| {
+            // The output device belongs to the audio output manager
+            // (`audio_set_output_device`) and tuner choices to the tuner
+            // commands (`tuner_select_input`, ...): a save from the screen
+            // never changes them.
+            let output_device_id = current.output_device_id.take();
+            let tuner = std::mem::take(&mut current.tuner);
+            *current = settings;
+            current.output_device_id = output_device_id;
+            current.tuner = tuner;
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +51,8 @@ pub fn run() {
             let drums = drums::DrumService::start(audio.engine(), &data_dir)?;
             app.manage(audio);
             app.manage(drums);
+            let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
+            app.manage(tuner);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +64,11 @@ pub fn run() {
             app_audio::audio_subscribe,
             app_audio::audio_heard_at,
             app_audio::audio_play_test_sound,
+            tuner::service::tuner_start,
+            tuner::service::tuner_stop,
+            tuner::service::tuner_select_input,
+            tuner::service::tuner_set_reference,
+            tuner::service::tuner_open_microphone_settings,
             drums::service::drums_state,
             drums::service::drums_set_playing,
             drums::service::drums_set_pattern,
@@ -60,6 +80,7 @@ pub fn run() {
         .expect("error while building Woodshed")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                app.state::<tuner::TunerService>().shutdown();
                 app.state::<app_audio::AudioService>().shutdown();
             }
         });
