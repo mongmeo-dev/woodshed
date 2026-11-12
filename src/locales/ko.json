@@ -184,5 +184,39 @@
     "hz": "{{value}}Hz",
     "frames": "{{value}}프레임",
     "ms": "{{value}}ms"
+  },
+  "tuner": {
+    "note": "음이름",
+    "centsLabel": "센트",
+    "cents": "{{value}}센트",
+    "frequency": "주파수",
+    "input": {
+      "device": "입력 장치",
+      "systemDefault": "시스템 기본값",
+      "disconnected": "연결되지 않은 장치",
+      "using": "사용 중인 장치",
+      "channel": "채널",
+      "channelNumber": "채널 {{value}}",
+      "mixDown": "모든 채널",
+      "level": "입력 레벨"
+    },
+    "reference": {
+      "label": "기준음",
+      "value": "A4 = {{value}}Hz",
+      "lower": "기준음 낮추기",
+      "raise": "기준음 높이기"
+    },
+    "strings": {
+      "label": "개방현",
+      "guitar6": "기타 6현",
+      "bass4": "베이스 4현",
+      "bass5": "베이스 5현"
+    },
+    "status": {
+      "permissionDenied": "시스템 설정에서 마이크 접근을 허용하세요",
+      "openSettings": "시스템 설정 열기",
+      "permissionPending": "마이크 접근을 허용하세요",
+      "noInput": "입력 장치를 열 수 없습니다"
+    }
   }
 }

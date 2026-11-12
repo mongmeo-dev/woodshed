@@ -12,17 +12,17 @@
     "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
     sans-serif;
 
+  /* hero-display: 56 / 600 / 1.07 / -0.28px (tuner note, metronome tempo) */
+  --ws-type-hero-size: 56px;
+  --ws-type-hero-weight: 600;
+  --ws-type-hero-leading: 1.07;
+  --ws-type-hero-tracking: -0.28px;
   /* display-md: 34 / 600 / 1.47 / -0.374px (line-height tightened for single-line titles) */
   --ws-type-title-size: 34px;
   --ws-type-title-weight: 600;
   --ws-type-title-tracking: -0.374px;
   /* display-lg leading (1.1) for single-line screen titles */
   --ws-type-title-leading: 1.1;
-  /* hero-display: 56 / 600 / 1.07 / -0.28px (large numeric readouts) */
-  --ws-type-hero-size: 56px;
-  --ws-type-hero-weight: 600;
-  --ws-type-hero-leading: 1.07;
-  --ws-type-hero-tracking: -0.28px;
   /* tagline: 21 / 600 / 1.19 / 0.231px */
   --ws-type-section-size: 21px;
   --ws-type-section-weight: 600;

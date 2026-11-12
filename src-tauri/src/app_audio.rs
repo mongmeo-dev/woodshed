@@ -213,10 +213,8 @@ impl OutputEnv for TauriOutputEnv {
 
     fn save_preferred(&mut self, preferred: Option<&str>) -> Result<(), String> {
         let store = self.app.state::<SettingsStore>();
-        let mut settings = store.get();
-        settings.output_device_id = preferred.map(str::to_owned);
         store
-            .save(settings)
+            .update(|settings| settings.output_device_id = preferred.map(str::to_owned))
             .map(|_| ())
             .map_err(|error| error.to_string())
     }

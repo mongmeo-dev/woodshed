@@ -6,6 +6,7 @@ import { ToolScreen } from "./shell/ToolScreen";
 import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import { MetronomeScreen } from "./tools/metronome/MetronomeScreen";
 import type { ViewId } from "./tools/tools";
+import { TunerScreen } from "./tools/tuner/TunerScreen";
 
 export function App() {
   const [view, setView] = useState<ViewId>("tuner");
@@ -18,6 +19,8 @@ export function App() {
             <SettingsScreen />
           ) : view === "metronome" ? (
             <MetronomeScreen />
+          ) : view === "tuner" ? (
+            <TunerScreen />
           ) : view === "drumMachine" ? (
             <DrumMachineScreen />
           ) : (
