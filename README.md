@@ -53,7 +53,7 @@ mise run stem-model   # = pnpm stem-model = sh tools/stem-model/build.sh
 ```
 
 - 가중치: Hugging Face [`adefossez/HTDemucs-6s`](https://huggingface.co/adefossez/HTDemucs-6s)의 고정 리비전 `3c5ee475be62`에서 `5c90dfd2.safetensors`를 받아 SHA-256(`d2a1745f…d411`)을 확인합니다. Demucs 코드는 MIT(Meta Platforms)이고, 가중치에는 별도 라이선스 표기가 없습니다(모델 카드에 license 필드 없음). 고지는 [`LICENSES/`](LICENSES/README.md)에 있습니다.
-- 변환: `tools/stem-model/`의 `core.py`(STFT/iSTFT를 뺀 핵심부)를 `convert.py`가 fp32 mlprogram으로 바꾸고 `xcrun coremlcompiler`로 컴파일합니다. Python은 mise로 고정한 uv 0.10.7이 만든 Python 3.12.8 가상환경에서 `requirements.lock.txt`(torch 2.7.0, coremltools 9.0, demucs 4.1.0 등 전부 고정)로 돌립니다. 처음 한 번 1분 안팎 걸립니다(가중치 52MB 다운로드, 변환 약 5초).
+- 변환: `tools/stem-model/`의 `core.py`(STFT/iSTFT를 뺀 핵심부)를 `convert.py`가 fp32 mlprogram으로 바꾸고 `xcrun coremlcompiler`로 컴파일합니다. Python은 mise로 고정한 uv 0.10.7이 만든 Python 3.12.8 가상환경에서 `requirements.lock.txt`(torch 2.7.0, coremltools 9.0, demucs 4.1.0 등 전부 고정)로 돌립니다. 처음 한 번은 가중치 52MB 다운로드, Python 패키지 설치, 변환(약 5초)을 합니다. 이 Mac에서 새 캐시로 약 21초 걸렸고, 네트워크와 uv 캐시 상태에 따라 다릅니다.
 - 결과와 가중치는 `~/Library/Caches/dev.mongmeo.woodshed/models`에 캐시되어 다음부터는 복사만 합니다. 스크립트·잠금 파일·가중치가 바뀌면 다시 변환합니다. 변환한 모델은 연구 단계 모델과 `model.mil`·가중치가 바이트 단위로 같습니다.
 - `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 모델이 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 디렉터리를 만들고, 모델이 필요한 테스트는 건너뛴 사실을 출력합니다. dev 앱은 캐시에 모델이 있으면 그것을 씁니다.
 - 앱 밖 DSP(STFT/iSTFT, 7.8초 청크, 삼각 가중치 오버랩-애드, 입력 정규화)는 Rust(`src-tauri/src/separation/`)에 있고, 기준 사양은 `tools/stem-model/dsp.py`(numpy)입니다. Rust 테스트는 `make_dsp_fixture.py`가 만든 고정 입력 기준값(`src-tauri/src/separation/testdata/dsp_reference.json`)과 비교합니다. `dsp.py`나 입력식을 바꾸면 이 파일을 다시 만듭니다.
@@ -61,9 +61,9 @@ mise run stem-model   # = pnpm stem-model = sh tools/stem-model/build.sh
 
 분리 동작(코드: `src-tauri/src/separation/`)
 
-- Core ML은 `CPUAndGPU`로 돌립니다. GPU가 가끔 틀린 결과를 냅니다: Apple M5·macOS 27에서 청크 사이에 GPU가 쉬면 다섯 번에 한 번꼴로 한 청크가 최대 3e-2까지 어긋났습니다(청크 SNR 26~60dB, 맞으면 120dB). 연구 단계 프로토타입도 같았습니다. 맞는 결과는 실행마다 비트 단위로 같고 틀린 결과는 매번 달라서, 같은 청크를 두 번 돌려 일치할 때만 받아들이고 네 번 안에 일치하지 않으면 그 청크만 CPU(결정적, 최대 오차 7e-6)로 돌립니다. 그래서 GPU 시간은 단일 실행의 약 2배입니다.
-- 결과: 30초 시험 음원(`make_audio.py`의 `mix30.wav`)을 세 번 분리해 모두 PyTorch `apply_model` 원본과 최대 절대오차 1.16e-6(스템별 SNR 101~129dB, float 출력 기준)이었습니다. Rust 테스트의 12초 합성곡은 PyTorch와 스템 레벨·6스템 합 대 원본 SNR(16.92dB)이 소수 둘째 자리까지 같습니다. 이 SNR은 Demucs가 스템 합을 원본과 맞추지 않아서 생기는 값이고 곡마다 다릅니다(`mix30.wav`는 25.8dB).
-- 분리는 한 번에 한 곡씩 하고, 앱 시작 5초 뒤 모델을 한 번 돌려 GPU 커널을 미리 컴파일합니다. 2분 동안 쓰지 않으면 모델과 버퍼(약 1GB)를 내려놓습니다. 스템은 확정된 구간부터 파일로 흘려 써서 곡 길이만큼 메모리가 늘지 않습니다.
+- Core ML은 `CPUAndGPU`로 돌립니다. GPU가 가끔 틀린 결과를 냅니다: Apple M5·macOS 27에서 청크 사이에 GPU가 쉬면 다섯 번에 한 번꼴로 한 청크가 최대 3e-2까지 어긋났습니다(청크 SNR 26~60dB, 맞으면 120dB). 연구 단계 프로토타입도 같았습니다. 맞는 결과는 실행마다 비트 단위로 같고 틀린 결과는 매번 달라서, 같은 청크를 두 번 돌려 일치할 때만 받아들이고 네 번 안에 일치하지 않으면 그 청크만 CPU(결정적, 최대 오차 7e-6)로 돌립니다. 그래서 GPU 시간은 단일 실행의 약 2배입니다. 긴 곡에서는 불일치가 실제로 생깁니다: 5분 곡에서 1번, 30분 곡(308청크)에서 17번 세 번째 실행으로 해결했습니다. 이것은 이 기기에서 관측한 현상에 맞춘 완화책이고, 정확성을 따로 보증하는 기준은 아닙니다.
+- 결과: 30초 시험 음원(`make_audio.py`의 `mix30.wav`)을 세 번 분리해 모두 PyTorch `apply_model` 원본과 최대 절대오차 1.16e-6(스템별 SNR 101~129dB, float 출력 기준)이었습니다. Rust 테스트는 12초 합성곡을 같은 `audio.wav`의 PyTorch 결과와 비교합니다: 고정 참조 구간(`testdata/band_pytorch_excerpt.f32`, 청크 경계를 걸치는 0.36초)에서 float 출력의 스템별 SNR 102.8~125.3dB, 최대 오차 4.2e-7이고, 16bit 스템 파일의 스템 레벨과 6스템 합 대 원본 잔차(16.92dB)도 PyTorch와 소수 둘째 자리까지 같습니다. 이 잔차는 Demucs가 스템 합을 원본과 맞추지 않아서 생기는 PyTorch 자체 값이고 곡마다 다릅니다(`mix30.wav`는 25.8dB).
+- 분리는 한 번에 한 곡씩 하고, 앱 시작 5초 뒤 모델을 한 번 돌려 GPU 커널을 미리 컴파일합니다. 2분 동안 쓰지 않으면 모델과 버퍼(약 1GB)를 내려놓습니다. 스템은 확정된 구간부터 파일로 흘려 쓰지만, 입력은 44.1kHz 스테레오 f32로 곡 전체를 메모리에 둡니다(1분에 약 21MB, 다른 레이트는 리샘플하는 동안 변환 전후가 함께 있음). 릴리스 빌드 peak footprint 실측(`separate_wav --discard`, 스템 쓰기 제외): 30초 1.22GB, 5분 1.35GB(48kHz 입력 1.43GB), 30분 1.87GB. 분리 시간은 30초 3.9초, 5분 37초, 30분 274초였습니다.
 
 ## 검사
 
@@ -115,7 +115,6 @@ cd src-tauri && mise exec -- cargo run --release --example latency_probe
 ## 미결 사항
 
 - htdemucs_6s 가중치에는 별도 라이선스 표기가 없습니다(코드는 MIT). 배포 방식을 정할 때 다시 확인합니다.
-- 스템 분리가 링크하는 Core ML 바인딩 `objc2-core-ml`(MIT·Zlib·Apache-2.0, Tauri가 쓰는 objc2 계열)은 배포 크레이트에 라이선스 파일이 없어 `LICENSES/rust-audio-crates.*`에 넣지 않았습니다(같은 계열인 `objc2`·`block2`도 아직 고지가 없습니다). 배포 방식을 정할 때 objc2 저장소의 MIT 전문과 함께 고지합니다.
 - 스템 분리는 Intel Mac에서 시험하지 않았습니다. 서명·번들된 앱의 첫 실행에서 GPU 커널 컴파일(10~35초)이 시스템 캐시에 남는지도 다시 재야 합니다.
 - 번들한 `yt-dlp_macos`는 PyInstaller 묶음이라 결합 저작물로는 GPLv3+입니다(yt-dlp 자체는 Unlicense). 앱은 별도 프로세스로 실행만 합니다. 배포 방식을 정할 때 다시 확인합니다.
 - YouTube는 JS 런타임 없이 yt-dlp 기본 클라이언트로 받습니다. 일부 영상 형식이 막히면 JS 런타임(deno 등) 번들 여부를 정해야 합니다.
