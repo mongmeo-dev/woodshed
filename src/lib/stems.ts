@@ -42,13 +42,23 @@ export interface Transport {
   ended: boolean;
   positionSecs: number;
   heardAtMs: number | null;
-  /** Engine frames rendered when sampled; commands scheduled at or before it are reflected. */
+  /** Engine frames rendered when sampled; see {@link reflects}. */
   renderedFrame: number;
 }
 
-/** Engine frame a command's events take effect at. */
+/**
+ * When a command shows in a transport sample: `ackFrame` is the first
+ * `renderedFrame` that includes its events (Rust `stems::ack_frame`: the
+ * engine runs an event at frame F in the block that ends after F, so
+ * `ackFrame = F + 1`).
+ */
 export interface Scheduled {
-  frame: number;
+  ackFrame: number;
+}
+
+/** The one place the screen decides whether a sample includes a command. */
+export function reflects(transport: Pick<Transport, "renderedFrame">, ackFrame: number): boolean {
+  return transport.renderedFrame >= ackFrame;
 }
 
 export interface TrackMixIntent {

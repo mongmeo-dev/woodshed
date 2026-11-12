@@ -176,7 +176,7 @@ let reports = engine.take_notifications();
 - `StemPlayer::new(tracks, start)` → `StemSource`(엔진 `Source`) + `Feeder`(일반 스레드, `FeederThread`) + `PlayerShared`. 트랙은 최대 `MAX_TRACKS`(8)개, 모두 같은 샘플레이트입니다.
 - 제어는 엔진 예약 이벤트로만 보냅니다: `Start`, `Stop`, `Seek { frame }`(곡 프레임), `Param`(`stems::param`: `SPEED` 0.5~1.0, 트랙별 `VOLUME`/`MUTE`/`SOLO`), A-B 반복은 `loop_events(range)`. 마스터 볼륨은 소스 게인(`set_gain`)입니다.
 - A-B 반복은 `MIN_LOOP_FRAMES`(256프레임) 이상이어야 합니다. 더 짧으면 플레이어가 무시합니다(반복 없음). 화면은 0.1초 미만 선택을 반복으로 만들지 않습니다.
-- 재생 명령(`stems_play`·`pause`·`seek`·`set_speed`·`set_loop`·`set_track`)은 이벤트가 적용될 엔진 프레임 `{ frame }`을 돌려주고, `stems_transport`는 `renderedFrame`을 함께 돌려줍니다. 화면은 `renderedFrame < frame`인 transport를 무시해, 아직 적용되지 않은 명령을 오래된 상태로 덮지 않습니다. 화면의 명령은 하나의 큐로 차례대로 보냅니다.
+- 재생 명령(`stems_play`·`pause`·`seek`·`set_speed`·`set_loop`·`set_track`·`restore`)은 `{ ackFrame }`을 돌려주고, `stems_transport`는 `renderedFrame`을 함께 돌려줍니다. **적용 판정은 한 가지입니다: `renderedFrame >= ackFrame`이면 그 명령이 반영된 상태입니다.** 엔진은 `[start, end)` 블록에서 `frame < end`인 이벤트만 실행한 뒤 `end`를 게시하므로, frame F에 예약한 명령의 `ackFrame`은 F+1입니다(Rust `stems::ack_frame`, TS `reflects`). `renderedFrame == F`는 아직 실행 전입니다. 화면은 이 판정을 통과하지 못한 transport를 무시하고, 명령은 하나의 큐로 차례대로 보냅니다.
 - 출력 레이트가 바뀌면 `Source::prepare`에서 같은 위치로 다시 시작합니다. 화면은 `audio://output-changed`를 받으면 `stems_restore(intent)`를 보냅니다. 이 명령은 한 번의 엔진 잠금 안에서 대기 이벤트를 취소하고, 화면의 의도 전체(아직 적용되지 않은 탐색, 속도, 반복, 트랙 믹스, 마스터, 재생 또는 정지)를 다시 예약합니다.
 
 ### Sidecar (yt-dlp, ffmpeg)
