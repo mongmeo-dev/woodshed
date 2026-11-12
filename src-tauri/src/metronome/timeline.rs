@@ -323,11 +323,32 @@ impl Timeline {
     ///   starts there.
     /// - Changing the polyrhythm or the meter restarts the polyrhythm cycle
     ///   at the start of the current bar.
+    /// - If the trainer has planned to stop and the stop is still ahead,
+    ///   the stop holds only while the new rules would stop there too;
+    ///   otherwise playback goes on from that bar end.
     pub fn apply(&mut self, settings: &MetronomeSettings) {
         let new = Rules::from_settings(settings);
         if self.cursor.finished {
-            self.rules = new;
-            return;
+            // The trainer decided to stop at `end_frame`, which has not come
+            // yet: take that bar-end decision again under the new rules.
+            let still_stops = new.base_tenths == self.rules.base_tenths
+                && new.trainer.is_some_and(|trainer| {
+                    trainer.end == TrainerEnd::Stop && self.cursor.bpm_tenths >= trainer.max_tenths
+                });
+            if still_stops {
+                self.rules = new;
+                return;
+            }
+            let c = &mut self.cursor;
+            c.finished = false;
+            c.segment_frame = c.end_frame;
+            c.segment_beat = c.beat;
+            if let Some(trainer) = new.trainer
+                && new.base_tenths == self.rules.base_tenths
+                && c.bpm_tenths < trainer.max_tenths
+            {
+                c.bpm_tenths = (c.bpm_tenths + trainer.step_tenths).min(trainer.max_tenths);
+            }
         }
         let frame = self.frame_at(self.cursor.beat, 0, 1);
         let old = std::mem::replace(&mut self.rules, new);

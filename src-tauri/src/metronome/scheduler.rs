@@ -149,6 +149,10 @@ impl Scheduler {
         announce: &mut Vec<Announcement>,
     ) -> Result<(), EngineError> {
         let cut = now + secs_to_frames(CHANGE_LEAD_SECS, self.sample_rate());
+        if self.timeline.is_finished() && self.timeline.next_frame() < cut {
+            // Playback ends too soon to schedule anything more.
+            return Ok(());
+        }
         if let Some(index) = self
             .planned
             .iter()
