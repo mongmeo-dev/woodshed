@@ -7,13 +7,19 @@
 //! - [`StemModel`]: the model behind a trait; `CoreMlModel` on macOS,
 //!   guarded by [`VerifiedModel`] against wrong GPU results.
 //! - [`Workspace::separate`]: streaming chunked separation at 44.1 kHz.
+//! - [`job`]: one song in the library (temporary directory, swap, manifest)
+//!   and the recovery at start.
+//! - [`SeparationService`]: the worker thread, queue, cancel, progress events.
 
 mod audio_io;
+mod commands;
 #[cfg(target_os = "macos")]
 mod coreml;
 pub mod dsp;
 mod engine;
+pub mod job;
 mod model;
+mod service;
 mod verify;
 
 #[cfg(test)]
@@ -24,12 +30,17 @@ use std::path::{Path, PathBuf};
 use crate::stems::StemName;
 
 pub use audio_io::{SongAudio, StemWriters, read_song};
+pub use commands::*;
 #[cfg(target_os = "macos")]
 pub use coreml::{ComputeUnits, CoreMlModel};
 pub use engine::{PLANES, SeparationOutput, Workspace};
 pub use model::{
     MODEL_ENV, MODEL_NAME, SeparationError, StemModel, default_cache_dir, is_model, locate_model,
     model_candidates,
+};
+pub use service::{
+    Emit, ModelLoader, STATE_CANCELLED, STATE_DONE, STATE_FAILED, STATE_RUNNING, SeparationService,
+    ServiceConfig,
 };
 pub use verify::{FallbackLoader, MAX_ATTEMPTS, VerifiedModel, VerifyStats};
 
@@ -70,4 +81,10 @@ pub fn load_verified(path: &Path) -> Result<VerifiedModel, SeparationError> {
 #[cfg(not(target_os = "macos"))]
 pub fn load_verified(_path: &Path) -> Result<VerifiedModel, SeparationError> {
     Err(SeparationError::ModelMissing)
+}
+
+/// The app's loader: the bundled model, else the build cache (dev builds).
+pub fn app_model_loader(resource_dir: Option<PathBuf>, cache_dir: Option<PathBuf>) -> ModelLoader {
+    let candidates = model_candidates(resource_dir.as_deref(), cache_dir.as_deref());
+    Box::new(move || load_model(&candidates))
 }

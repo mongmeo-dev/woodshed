@@ -25,7 +25,8 @@ pub use import::{
     AUDIO_EXTENSIONS, ImportError, ImportProgress, ImportStage, import_file, import_link,
 };
 pub use library::{
-    Library, LibraryError, Manifest, SongSource, StemEntry, StemName, StemStatus, TrackName,
+    AUDIO_FILE, Library, LibraryError, Manifest, STEMS_DIR, SongSource, StemEntry, StemName,
+    StemStatus, TrackName,
 };
 pub use player::{FeederThread, PlayerError, StemPlayer};
 pub use reader::{LoopRange, MIN_LOOP_FRAMES};
