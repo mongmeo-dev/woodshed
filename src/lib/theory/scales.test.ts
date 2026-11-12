@@ -9,6 +9,7 @@ import {
   SCALE_IDS,
   type ScaleId,
   scaleIntervals,
+  spellFrom,
   spellScale,
 } from ".";
 
@@ -262,5 +263,37 @@ describe("well-known scales", () => {
     [2, "locrian", ["D", "Eb", "F", "G", "Ab", "Bb", "C"]],
   ] as [PitchClass, ScaleId, string[]][])("key %i %s", (root, scale, expected) => {
     expect(names(root, scale)).toEqual(expected);
+  });
+});
+
+describe("mode notation", () => {
+  // Each mode is the major scale of its parent key, started on another degree:
+  // C# Dorian = B major from C#, G# Phrygian = E major from G#, and so on.
+  test.each([
+    [1, "dorian", ["C#", "D#", "E", "F#", "G#", "A#", "B"]],
+    [8, "phrygian", ["G#", "A", "B", "C#", "D#", "E", "F#"]],
+    [6, "mixolydian", ["F#", "G#", "A#", "B", "C#", "D#", "E"]],
+    [3, "mixolydian", ["Eb", "F", "G", "Ab", "Bb", "C", "Db"]],
+    [6, "locrian", ["F#", "G", "A", "B", "C", "D", "E"]],
+    [1, "lydian", ["Db", "Eb", "F", "G", "Ab", "Bb", "C"]],
+    [10, "lydian", ["Bb", "C", "D", "E", "F", "G", "A"]],
+  ] as [PitchClass, ScaleId, string[]][])("key %i %s", (root, scale, expected) => {
+    expect(names(root, scale)).toEqual(expected);
+  });
+
+  test("the key picker spells key 6 Lydian from Gb, the root with fewer accidentals", () => {
+    // Db major from Gb: five accidentals. F# Lydian would need seven (B# and E#).
+    expect(names(6, "lydian")).toEqual(["Gb", "Ab", "Bb", "C", "Db", "Eb", "F"]);
+  });
+
+  test("an explicitly spelled sharp root keeps its sharps, including E# and B#", () => {
+    const from = (root: string, scale: ScaleId) =>
+      spellFrom(parseNote(root), scale).map((note) => note.name);
+    // C# major from F#.
+    expect(from("F#", "lydian")).toEqual(["F#", "G#", "A#", "B#", "C#", "D#", "E#"]);
+    // C# major from D#.
+    expect(from("D#", "dorian")).toEqual(["D#", "E#", "F#", "G#", "A#", "B#", "C#"]);
+    // The same pitch class spelled from the flat root is a different, cheaper notation.
+    expect(from("Gb", "lydian")).toEqual(["Gb", "Ab", "Bb", "C", "Db", "Eb", "F"]);
   });
 });
