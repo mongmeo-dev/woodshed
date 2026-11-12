@@ -6,9 +6,11 @@
 //! (chunk SNR 26–60 dB against PyTorch instead of 120 dB); it happens far
 //! less often back to back. Right GPU results are bit-identical from run to
 //! run and wrong ones differ from each other, so a result is accepted once
-//! two runs agree. If [`MAX_ATTEMPTS`] runs never agree, the chunk runs on
-//! the CPU, which is deterministic (max error 7e-6) but several times
-//! slower.
+//! two runs agree. A run with NaN or infinity never agrees. If
+//! [`MAX_ATTEMPTS`] runs never agree, the chunk runs on the CPU, which is
+//! deterministic (max error 7e-6) but several times slower. This is a
+//! mitigation from what was measured on that machine, not an independent
+//! check of correctness.
 
 use super::model::{SeparationError, StemModel};
 
@@ -52,6 +54,10 @@ fn fingerprint(spec_out: &[f32], wave_out: &[f32]) -> u64 {
     hash
 }
 
+fn finite(values: &[f32]) -> bool {
+    values.iter().all(|v| v.is_finite())
+}
+
 fn close(a: &[f32], b: &[f32]) -> bool {
     a.len() == b.len()
         && a.iter()
@@ -88,7 +94,13 @@ impl VerifiedModel {
             Some(model) => model,
             slot => slot.insert((self.load_fallback)()?),
         };
-        fallback.predict(mix, spec, spec_out, wave_out)
+        fallback.predict(mix, spec, spec_out, wave_out)?;
+        if !finite(spec_out) || !finite(wave_out) {
+            return Err(SeparationError::Model(
+                "the model returned NaN or infinity".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -108,6 +120,11 @@ impl StemModel for VerifiedModel {
             if let Err(error) = self.primary.predict(mix, spec, spec_out, wave_out) {
                 log::warn!("stem model run failed, using the fallback: {error}");
                 return self.run_fallback(mix, spec, spec_out, wave_out);
+            }
+            if !finite(spec_out) || !finite(wave_out) {
+                // Never agrees, not even with an identical NaN run.
+                log::warn!("stem model run returned NaN or infinity");
+                continue;
             }
             let print = fingerprint(spec_out, wave_out);
             let agrees = attempt > 0
@@ -268,6 +285,52 @@ mod tests {
         // The next chunk tries the primary again.
         predict(&mut model);
         assert_eq!(runs.get(), MAX_ATTEMPTS + 2);
+    }
+
+    /// Returns the same NaN-tainted result every time.
+    struct Nan(Rc<Cell<usize>>);
+
+    impl StemModel for Nan {
+        fn predict(
+            &mut self,
+            mix: &[f32],
+            _spec: &[f32],
+            spec_out: &mut [f32],
+            wave_out: &mut [f32],
+        ) -> Result<(), SeparationError> {
+            self.0.set(self.0.get() + 1);
+            answer(mix, spec_out, wave_out);
+            spec_out[3] = f32::NAN;
+            wave_out[1] = f32::INFINITY;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn identical_non_finite_runs_never_agree() {
+        let runs = Rc::new(Cell::new(0));
+        let cpu_runs = Rc::new(Cell::new(0));
+        let loads = cpu_runs.clone();
+        let mut model = VerifiedModel::new(
+            Box::new(Nan(runs.clone())),
+            Box::new(move || Ok(Box::new(Cpu(loads.clone())) as Box<dyn StemModel>)),
+        );
+        let (spec_out, wave_out) = predict(&mut model);
+        assert!(spec_out.iter().chain(&wave_out).all(|v| v.is_finite()));
+        assert_eq!(wave_out[0], 42.0, "the fallback answered");
+        assert_eq!((runs.get(), cpu_runs.get()), (MAX_ATTEMPTS, 1));
+
+        // A fallback that is not finite either is an error, not a result.
+        let mut model = VerifiedModel::new(
+            Box::new(Nan(Rc::new(Cell::new(0)))),
+            Box::new(|| Ok(Box::new(Nan(Rc::new(Cell::new(0)))) as Box<dyn StemModel>)),
+        );
+        let (mut spec_out, mut wave_out) = (vec![0.0; 24], vec![0.0; 12]);
+        assert!(
+            model
+                .predict(&[0.1, 0.2], &[], &mut spec_out, &mut wave_out)
+                .is_err()
+        );
     }
 
     #[test]
