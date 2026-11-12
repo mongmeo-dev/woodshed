@@ -93,14 +93,22 @@ impl Source for Click {
 - `open_input(&InputRequest { device_id, channel: InputChannel::Single(0) | MixDown, target_buffer_frames: 64, ring_frames })` → `InputCapture { samples: rtrb::Consumer<f32>, info, shared }`. 모노 f32 샘플을 일반 스레드에서 읽습니다. `shared.overflows()`, `capture_latency_ns()`, `take_error()` 제공. `InputCapture`를 drop하면 멈춥니다.
 - macOS 마이크 권한 문구는 `src-tauri/Info.plist`에 있습니다.
 
-### 장치 변경과 출력 복구
+### 출력 관리자 (출력의 단일 소유자)
 
-- `spawn_device_monitor(interval, hook)`가 1초마다 `hook(&DeviceSnapshot, changed)`를 부릅니다(`changed`는 목록이 바뀐 틱).
-- 이벤트는 둘로 나뉩니다.
-  - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 경우에만. 입력을 쓰는 노드는 이를 받아 입력을 다시 엽니다.
-  - `audio://output-changed` (`{ generation, deviceId, sampleRate, channels, bufferFrames }`): 출력 스트림을 (다시) 연 모든 경우(수동 전환, 시스템 기본 장치 추종, 오류 복구) 성공 시. 프런트는 `onOutputChanged`로 받습니다.
-- 매 틱 `reopen_reason`(`src-tauri/src/audio/recovery.rs`)으로 출력 부재·스트림 오류·장치 분리·기본 장치 변경(시스템 기본값 모드)·선호 장치 복귀·장치 샘플레이트 변경을 검사해 저장된 장치(실패 시 기본 장치)로 다시 엽니다. 실패하면 1초부터 30초까지 두 배씩 간격을 늘려 재시도합니다.
-- 출력 장치 선택 명령(`audio_set_output_device`)은 설정 저장까지 합니다.
+- 출력 스트림을 열고 바꾸고 복구하는 일은 `audio-output` 스레드의 `OutputManager`(`src-tauri/src/audio/output_manager.rs`)만 합니다. 다른 코드는 `AudioEngine::open_output`을 직접 부르지 않습니다.
+  - 수동 선택: 명령 `audio_set_output_device({ deviceId })`가 관리자에게 채널로 요청하고 응답을 기다립니다. 요청과 1초 주기 감시 틱은 같은 스레드에서 도착 순서대로 처리됩니다.
+  - 성공하면 새 `AudioStatus`, 실패하면 `{ code: "openFailed" | "saveFailed" | "unavailable" }`(`src/lib/audio.ts`의 `OutputSelectError`). `openFailed`·`saveFailed`여도 선택은 실행 중 선호로 적용됩니다(`openFailed`면 기본 장치로 재생하며 선택 장치를 재시도, `saveFailed`면 새 출력으로 재생하지만 디스크에는 이전 값).
+  - 출력 장치 값은 관리자 소유라 `settings_save`는 `outputDeviceId`를 바꾸지 않습니다.
+- 상태 머신(`OutputMode`).
+  - `OnTarget`: 선호 장치(없으면 시스템 기본값)로 재생 중. 매 틱 출력 부재·스트림 오류(Xrun 제외)·장치 분리·기본 장치 변경(기본값 모드만)·장치 샘플레이트 변경을 검사해 처음부터 다시 엽니다.
+  - `Fallback { preferred_retry }`: 선호 장치를 쓸 수 없어 기본값으로 재생 중. 선호 복귀 시도는 백오프(실패마다 1→30초 두 배)로만 하고, 폴백이 정상이면 건드리지 않습니다.
+  - `Failed { retry }`: 아무것도 열리지 않음. 같은 백오프로 재시도.
+  - 백오프는 장치 목록 변경·사용자 선택·선호 장치 성공 때만 초기화됩니다.
+- 출력 교체는 새 스트림을 먼저 빌드하고 성공했을 때만 이전 스트림을 멈춥니다. 실패하면 기존 출력이 끊김 없이 계속 재생되고 세대도 바뀌지 않습니다.
+- 이벤트 불변식.
+  - `audio://output-changed` (`{ generation, deviceId, sampleRate, channels, bufferFrames }`): 출력 열기 성공마다 정확히 1회, 성공 지점에서 발행합니다(이후 설정 저장 실패와 무관). 프런트는 `onOutputChanged`로 받습니다.
+  - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 틱에만. 입력을 쓰는 노드는 이를 받아 입력을 다시 엽니다.
+- 상태 머신은 `OutputEnv` 트레이트로 환경을 분리해 가짜 환경으로 테스트합니다. 출력 관련 동작을 바꾸면 여러 틱 시나리오 테스트를 추가합니다.
 
 ### 오프라인 렌더 (테스트)
 
