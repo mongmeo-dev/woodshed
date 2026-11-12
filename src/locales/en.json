@@ -65,7 +65,6 @@
     "emptyName": "Enter a name",
     "saveFailed": "Couldn't save the pattern",
     "deleteFailed": "Couldn't delete the pattern",
-    "grid": "Steps",
     "step": "{{track}}, step {{step}}",
     "mute": "Mute {{track}}",
     "volume": "{{track}} Volume",
