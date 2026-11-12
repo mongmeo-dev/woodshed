@@ -218,5 +218,55 @@
       "permissionPending": "마이크 접근을 허용하세요",
       "noInput": "입력 장치를 열 수 없습니다"
     }
+  },
+  "fretboard": {
+    "board": "지판",
+    "scroll": "지판 스크롤",
+    "root": "루트",
+    "marker": {
+      "position": "{{string}}번 줄 {{fret}}프렛",
+      "degree": "도수 {{interval}}"
+    },
+    "instrument": {
+      "label": "악기",
+      "guitar6": "기타 6현",
+      "bass4": "베이스 4현",
+      "bass5": "베이스 5현"
+    },
+    "key": "키",
+    "scale": "스케일",
+    "scaleGroups": {
+      "basic": "기본",
+      "pentatonic": "펜타토닉·블루스",
+      "modes": "모드",
+      "other": "그 외"
+    },
+    "scales": {
+      "major": "메이저",
+      "naturalMinor": "내추럴 마이너",
+      "harmonicMinor": "하모닉 마이너",
+      "melodicMinor": "멜로딕 마이너",
+      "majorPentatonic": "메이저 펜타토닉",
+      "minorPentatonic": "마이너 펜타토닉",
+      "blues": "블루스",
+      "majorBlues": "메이저 블루스",
+      "ionian": "이오니안",
+      "dorian": "도리안",
+      "phrygian": "프리지안",
+      "lydian": "리디안",
+      "mixolydian": "믹솔리디안",
+      "aeolian": "에올리안",
+      "locrian": "로크리안",
+      "phrygianDominant": "프리지안 도미넌트",
+      "lydianDominant": "리디안 도미넌트",
+      "wholeTone": "온음음계"
+    },
+    "display": {
+      "label": "표시",
+      "notes": "음이름",
+      "intervals": "음정"
+    },
+    "frets": "프렛",
+    "leftHanded": "왼손잡이"
   }
 }

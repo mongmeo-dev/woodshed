@@ -218,5 +218,55 @@
       "permissionPending": "Allow microphone access",
       "noInput": "Can't open the input device"
     }
+  },
+  "fretboard": {
+    "board": "Fretboard",
+    "scroll": "Fretboard Scroll",
+    "root": "Root",
+    "marker": {
+      "position": "String {{string}}, Fret {{fret}}",
+      "degree": "Degree {{interval}}"
+    },
+    "instrument": {
+      "label": "Instrument",
+      "guitar6": "6-String Guitar",
+      "bass4": "4-String Bass",
+      "bass5": "5-String Bass"
+    },
+    "key": "Key",
+    "scale": "Scale",
+    "scaleGroups": {
+      "basic": "Basic",
+      "pentatonic": "Pentatonic & Blues",
+      "modes": "Modes",
+      "other": "Other"
+    },
+    "scales": {
+      "major": "Major",
+      "naturalMinor": "Natural Minor",
+      "harmonicMinor": "Harmonic Minor",
+      "melodicMinor": "Melodic Minor",
+      "majorPentatonic": "Major Pentatonic",
+      "minorPentatonic": "Minor Pentatonic",
+      "blues": "Blues",
+      "majorBlues": "Major Blues",
+      "ionian": "Ionian",
+      "dorian": "Dorian",
+      "phrygian": "Phrygian",
+      "lydian": "Lydian",
+      "mixolydian": "Mixolydian",
+      "aeolian": "Aeolian",
+      "locrian": "Locrian",
+      "phrygianDominant": "Phrygian Dominant",
+      "lydianDominant": "Lydian Dominant",
+      "wholeTone": "Whole Tone"
+    },
+    "display": {
+      "label": "Show",
+      "notes": "Note Names",
+      "intervals": "Intervals"
+    },
+    "frets": "Frets",
+    "leftHanded": "Left-Handed"
   }
 }
