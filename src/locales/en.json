@@ -38,5 +38,39 @@
     "hz": "{{value}} Hz",
     "frames": "{{value}} frames",
     "ms": "{{value}} ms"
+  },
+  "tuner": {
+    "note": "Note",
+    "centsLabel": "Cents",
+    "cents": "{{value}} cents",
+    "frequency": "Frequency",
+    "input": {
+      "device": "Input Device",
+      "systemDefault": "System Default",
+      "disconnected": "Disconnected Device",
+      "using": "Using",
+      "channel": "Channel",
+      "channelNumber": "Channel {{value}}",
+      "mixDown": "All Channels",
+      "level": "Input Level"
+    },
+    "reference": {
+      "label": "Reference Pitch",
+      "value": "A4 = {{value}} Hz",
+      "lower": "Lower Reference Pitch",
+      "raise": "Raise Reference Pitch"
+    },
+    "strings": {
+      "label": "Open Strings",
+      "guitar6": "Guitar (6)",
+      "bass4": "Bass (4)",
+      "bass5": "Bass (5)"
+    },
+    "status": {
+      "permissionDenied": "Allow microphone access in System Settings",
+      "openSettings": "Open System Settings",
+      "permissionPending": "Allow microphone access",
+      "noInput": "Can't open the input device"
+    }
   }
 }

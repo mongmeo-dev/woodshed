@@ -4,6 +4,7 @@ import { SettingsScreen } from "./settings/SettingsScreen";
 import { Sidebar } from "./shell/Sidebar";
 import { ToolScreen } from "./shell/ToolScreen";
 import type { ViewId } from "./tools/tools";
+import { TunerScreen } from "./tools/tuner/TunerScreen";
 
 export function App() {
   const [view, setView] = useState<ViewId>("tuner");
@@ -11,7 +12,15 @@ export function App() {
     <SettingsProvider>
       <div className="shell">
         <Sidebar active={view} onSelect={setView} />
-        <main>{view === "settings" ? <SettingsScreen /> : <ToolScreen tool={view} />}</main>
+        <main>
+          {view === "settings" ? (
+            <SettingsScreen />
+          ) : view === "tuner" ? (
+            <TunerScreen />
+          ) : (
+            <ToolScreen tool={view} />
+          )}
+        </main>
       </div>
     </SettingsProvider>
   );
