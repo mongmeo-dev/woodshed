@@ -3,6 +3,7 @@ import { SettingsProvider } from "./settings/SettingsProvider";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { Sidebar } from "./shell/Sidebar";
 import { ToolScreen } from "./shell/ToolScreen";
+import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import { MetronomeScreen } from "./tools/metronome/MetronomeScreen";
 import type { ViewId } from "./tools/tools";
 
@@ -17,6 +18,8 @@ export function App() {
             <SettingsScreen />
           ) : view === "metronome" ? (
             <MetronomeScreen />
+          ) : view === "drumMachine" ? (
+            <DrumMachineScreen />
           ) : (
             <ToolScreen tool={view} />
           )}
