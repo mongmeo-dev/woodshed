@@ -38,5 +38,72 @@
     "hz": "{{value}} Hz",
     "frames": "{{value}} frames",
     "ms": "{{value}} ms"
+  },
+  "stems": {
+    "percent": "{{value}}%",
+    "import": {
+      "openFile": "Open File",
+      "link": "YouTube Link",
+      "download": "Download",
+      "cancel": "Cancel",
+      "drop": "Drop Here",
+      "stage": {
+        "download": "Downloading",
+        "extract": "Extracting Audio",
+        "decode": "Loading"
+      },
+      "stageProgress": "{{stage}} {{percent}}%"
+    },
+    "library": {
+      "title": "Songs",
+      "empty": "Drag in a file or paste a YouTube link",
+      "delete": "Delete",
+      "deleteSong": "Delete {{title}}",
+      "confirmDelete": "Delete this song?"
+    },
+    "player": {
+      "play": "Play",
+      "pause": "Pause",
+      "position": "Playback Position",
+      "time": "{{position}} / {{duration}}",
+      "speed": "Speed",
+      "loopRange": "Loop {{start}}–{{end}}",
+      "loopClear": "Clear Loop"
+    },
+    "mixer": {
+      "title": "Mixer",
+      "master": "Master",
+      "masterVolume": "Master Volume",
+      "volume": "{{track}} Volume",
+      "mute": "Mute {{track}}",
+      "muteShort": "M",
+      "solo": "Solo {{track}}",
+      "soloShort": "S"
+    },
+    "tracks": {
+      "original": "Original",
+      "vocals": "Vocals",
+      "drums": "Drums",
+      "bass": "Bass",
+      "guitar": "Guitar",
+      "piano": "Piano",
+      "other": "Other"
+    },
+    "separation": {
+      "start": "Separate Stems",
+      "running": "Separating {{percent}}%",
+      "failed": "Couldn't separate stems"
+    },
+    "errors": {
+      "invalidLink": "Not a YouTube video link",
+      "toolsMissing": "Download tools not found",
+      "network": "Can't connect to the internet",
+      "unavailable": "This video can't be downloaded",
+      "unsupportedFile": "Unsupported file",
+      "busy": "Another song is loading",
+      "cancelled": "Cancelled",
+      "failed": "Couldn't load the song",
+      "open": "Can't open the song"
+    }
   }
 }
