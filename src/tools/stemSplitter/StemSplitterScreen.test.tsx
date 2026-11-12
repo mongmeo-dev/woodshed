@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { i18n } from "../../i18n";
-import type { OpenedSong, SongSummary } from "../../lib/stems";
+import type { OpenedSong, SeparationEvent, SongSummary, StemEntry } from "../../lib/stems";
 import { StemSplitterScreen } from "./StemSplitterScreen";
 
 /**
@@ -33,10 +33,16 @@ const backend = vi.hoisted(() => {
       mix: [] as Mix[],
     },
     outputChanged: null as null | ((change: unknown) => void),
+    /** The song's manifest stems, separations the backend reports, the event listener. */
+    stems: [] as StemEntry[],
+    separations: [] as SeparationEvent[],
+    separation: null as null | ((event: SeparationEvent) => void),
     reset() {
       state.run += 1;
       state.calls = [];
       state.tracks = ["original"];
+      state.stems = [];
+      state.separations = [];
       state.manual = false;
       state.frame = 0;
       state.lastFrame = 0;
@@ -86,7 +92,7 @@ vi.mock("../../lib/ipc", () => ({
       durationSecs: 180,
       sampleRate: 44_100,
       addedAtMs: 1,
-      stems: [],
+      stems: backend.stems.map((stem) => ({ ...stem })),
     };
     const applied = backend.applied;
     switch (command) {
@@ -153,10 +159,22 @@ vi.mock("../../lib/ipc", () => ({
           applied.playing = intent.playing;
         });
       }
+      case "stems_separations":
+        return backend.separations;
       default:
         return fallback;
     }
   }),
+}));
+
+vi.mock("../../lib/stems", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/stems")>()),
+  onSeparation: async (listener: (event: SeparationEvent) => void) => {
+    backend.separation = listener;
+    return () => {
+      backend.separation = null;
+    };
+  },
 }));
 
 vi.mock("../../lib/audio", async (importOriginal) => ({
@@ -190,7 +208,7 @@ async function renderOpened() {
   expect(await screen.findByRole("heading", { name: "Practice Song" })).toBeTruthy();
 }
 
-test("the newest song opens with one original track and no separate button", async () => {
+test("the newest song opens with one original track and a separate button", async () => {
   await renderOpened();
   expect(called("stems_open")).toEqual([{ id: "song1" }]);
   const mixer = screen.getByRole("heading", { name: "Mixer" }).closest("section");
@@ -198,6 +216,71 @@ test("the newest song opens with one original track and no separate button", asy
   expect(within(mixer).getByText("Original")).toBeTruthy();
   expect(within(mixer).getByRole("slider", { name: "Original Volume" })).toBeTruthy();
   expect(within(mixer).getByRole("slider", { name: "Master Volume" })).toBeTruthy();
+  expect(within(mixer).getByRole("button", { name: "Separate Stems" })).toBeTruthy();
+});
+
+const SIX_STEMS = ["vocals", "drums", "bass", "guitar", "piano", "other"] as const;
+
+function emitSeparation(event: Omit<SeparationEvent, "songId">) {
+  act(() => backend.separation?.({ songId: "song1", ...event }));
+}
+
+test("separating shows progress and can be cancelled", async () => {
+  await renderOpened();
+  fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
+  expect(called("stems_separate")).toEqual([{ songId: "song1" }]);
+  expect(await screen.findByRole("progressbar", { name: "Preparing" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+
+  emitSeparation({ state: "running", progress: 0.5 });
+  const bar = await screen.findByRole("progressbar", { name: "Separating 50%" });
+  expect(bar.getAttribute("aria-valuenow")).toBe("50");
+  expect(screen.getByText("Separating 50%")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(called("stems_cancel_separation")).toEqual([{ songId: "song1" }]));
+  emitSeparation({ state: "cancelled", progress: null });
+  expect(await screen.findByRole("button", { name: "Separate Stems" })).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a finished separation reopens the song with its six stems", async () => {
+  await renderOpened();
+  fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
+  emitSeparation({ state: "running", progress: 1 });
+  backend.tracks = [...SIX_STEMS];
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "ready" }));
+  emitSeparation({ state: "done", progress: 1 });
+  await waitFor(() => expect(called("stems_open")).toHaveLength(2));
+  for (const name of ["Vocals", "Drums", "Bass", "Guitar", "Piano", "Other"]) {
+    expect(await screen.findByRole("slider", { name: `${name} Volume` })).toBeTruthy();
+  }
+  expect(screen.queryByRole("slider", { name: "Original Volume" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
+test("a failed separation shows a short error and the button again", async () => {
+  await renderOpened();
+  fireEvent.click(screen.getByRole("button", { name: "Separate Stems" }));
+  emitSeparation({ state: "failed", progress: null });
+  expect((await screen.findByRole("alert")).textContent).toBe("Couldn't separate stems");
+  expect(screen.getByRole("button", { name: "Separate Stems" })).toBeTruthy();
+});
+
+test("a separation that started earlier shows its progress when the screen opens", async () => {
+  backend.separations = [{ songId: "song1", state: "running", progress: 0.3 }];
+  await renderOpened();
+  expect(await screen.findByRole("progressbar", { name: "Separating 30%" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
+});
+
+test("a song the manifest shows waiting is in progress before any event", async () => {
+  backend.stems = SIX_STEMS.map((name) => ({ name, status: "pending" }));
+  await renderOpened();
+  expect(await screen.findByRole("progressbar", { name: "Preparing" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Separate Stems" })).toBeNull();
 });
 

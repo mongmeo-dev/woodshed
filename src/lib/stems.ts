@@ -125,7 +125,8 @@ export interface LoopRange {
 /** Progress of a stem separation (emitted by the stem engine). */
 export interface SeparationEvent {
   songId: string;
-  state: "running" | "done" | "failed";
+  /** `running` covers waiting in the queue and loading the model (`progress` null). */
+  state: "running" | "done" | "failed" | "cancelled";
   progress: number | null;
 }
 
@@ -271,6 +272,35 @@ export function getTransport(): Promise<Transport | null> {
  */
 export function restore(intent: PlayerIntent): Promise<Scheduled | null> {
   return call<Scheduled | null>("stems_restore", { intent }, null);
+}
+
+/** Queues a song for separation; progress arrives as `stems://separation` events. */
+export function separate(songId: string): Promise<void> {
+  return call("stems_separate", { songId }, undefined);
+}
+
+/** Cancels a queued or running separation; a `cancelled` event follows. */
+export function cancelSeparation(songId: string): Promise<void> {
+  return call("stems_cancel_separation", { songId }, undefined);
+}
+
+/** Separations not finished yet (running first), as their latest event. */
+export function listSeparations(): Promise<SeparationEvent[]> {
+  return call<SeparationEvent[]>("stems_separations", {}, []);
+}
+
+/** True once every stem of the song is separated. */
+export function stemsReady(song: { stems: StemEntry[] }): boolean {
+  return song.stems.length > 0 && song.stems.every((stem) => stem.status === "ready");
+}
+
+/** The separation a song's manifest shows in progress, before any event arrives. */
+export function separationFromStems(song: {
+  id: string;
+  stems: StemEntry[];
+}): SeparationEvent | null {
+  const busy = song.stems.some((stem) => stem.status === "pending" || stem.status === "running");
+  return busy ? { songId: song.id, state: "running", progress: null } : null;
 }
 
 export async function onSeparation(
