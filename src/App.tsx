@@ -3,6 +3,7 @@ import { SettingsProvider } from "./settings/SettingsProvider";
 import { SettingsScreen } from "./settings/SettingsScreen";
 import { Sidebar } from "./shell/Sidebar";
 import { ToolScreen } from "./shell/ToolScreen";
+import { FretboardScreen } from "./tools/fretboard/FretboardScreen";
 import type { ViewId } from "./tools/tools";
 
 export function App() {
@@ -11,7 +12,15 @@ export function App() {
     <SettingsProvider>
       <div className="shell">
         <Sidebar active={view} onSelect={setView} />
-        <main>{view === "settings" ? <SettingsScreen /> : <ToolScreen tool={view} />}</main>
+        <main>
+          {view === "settings" ? (
+            <SettingsScreen />
+          ) : view === "fretboard" ? (
+            <FretboardScreen />
+          ) : (
+            <ToolScreen tool={view} />
+          )}
+        </main>
       </div>
     </SettingsProvider>
   );
