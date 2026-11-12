@@ -6,6 +6,7 @@ import { ToolScreen } from "./shell/ToolScreen";
 import { DrumMachineScreen } from "./tools/drumMachine/DrumMachineScreen";
 import { StemSplitterScreen } from "./tools/stemSplitter/StemSplitterScreen";
 import type { ViewId } from "./tools/tools";
+import { TunerScreen } from "./tools/tuner/TunerScreen";
 
 export function App() {
   const [view, setView] = useState<ViewId>("tuner");
@@ -16,6 +17,8 @@ export function App() {
         <main>
           {view === "settings" ? (
             <SettingsScreen />
+          ) : view === "tuner" ? (
+            <TunerScreen />
           ) : view === "drumMachine" ? (
             <DrumMachineScreen />
           ) : view === "stemSplitter" ? (

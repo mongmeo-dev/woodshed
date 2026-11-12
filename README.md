@@ -82,7 +82,6 @@ cd src-tauri && mise exec -- cargo run --release --example latency_probe
 - 스템 분리 실행(Demucs)은 stem-engine 작업에서 연결합니다. 화면에는 분리 버튼·진행률 자리만 있습니다(계약: [`AGENTS.md`](AGENTS.md#스템-라이브러리-계약-src-taurisrcstems)).
 - 번들한 `yt-dlp_macos`는 PyInstaller 묶음이라 결합 저작물로는 GPLv3+입니다(yt-dlp 자체는 Unlicense). 앱은 별도 프로세스로 실행만 합니다. 배포 방식을 정할 때 다시 확인합니다.
 - YouTube는 JS 런타임 없이 yt-dlp 기본 클라이언트로 받습니다. 일부 영상 형식이 막히면 JS 런타임(deno 등) 번들 여부를 정해야 합니다.
-
-- 마이크 권한 문구(`src-tauri/Info.plist`)는 영어 한 가지입니다. 현지화는 튜너 작업에서 정합니다.
+- 마이크 권한 문구는 `src-tauri/Info.plist`(기본, 영어)와 `src-tauri/macos/{en,ko}.lproj/InfoPlist.strings`(`bundle.macOS.files`로 번들에 복사)에 있습니다.
 - 출력이 바뀌어 샘플레이트가 달라지면 이미 예약된 이벤트의 프레임 위치는 그대로라 시간상 위치가 달라집니다. 메트로놈·드럼·스템 플레이어는 `audio://output-changed`를 받아 다시 예약해야 합니다.
 - 출력 버퍼 하한은 64프레임입니다. 기기가 더 작은 버퍼를 허용해도 기기별 드롭아웃을 피하려고 쓰지 않습니다.

@@ -31,18 +31,26 @@ hound = "3.5.1"
 signalsmith-stretch = "0.1.3"
 rubato = "5.0.1"
 tauri-plugin-dialog = "2.8.4"
+realfft = "3.5.1"
 
-# DSP and decoding crates are slow unoptimised; keep debug builds and tests usable.
+[target.'cfg(target_os = "macos")'.dependencies]
+# Microphone permission (AVCaptureDevice); same objc2 family as tauri's.
+objc2 = "0.6.5"
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+block2 = "0.6.2"
+
+# DSP and decoding crates are slow unoptimised; keep debug builds and tests
+# (stem player, tuner FFT) usable.
 [profile.dev.package.signalsmith-stretch]
 opt-level = 3
 
 [profile.dev.package.rubato]
 opt-level = 3
 
-[profile.dev.package.realfft]
+[profile.dev.package.rustfft]
 opt-level = 3
 
-[profile.dev.package.rustfft]
+[profile.dev.package.realfft]
 opt-level = 3
 
 [profile.dev.package.symphonia-core]
