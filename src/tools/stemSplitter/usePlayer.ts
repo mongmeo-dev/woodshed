@@ -9,6 +9,7 @@ import {
   pause,
   play,
   positionAt,
+  reflects,
   restore,
   type Scheduled,
   seek,
@@ -63,9 +64,9 @@ function sampleFrom(transport: Transport, now = performance.now()): TransportSam
  * The open song, its mix, and transport synced to the heard time.
  *
  * Commands go out one at a time through a queue (so an output-change restore
- * never interleaves with a user command). Each transport command returns the
- * engine frame it takes effect at; transport samples rendered before that
- * frame are ignored, so a slow poll never undoes what the user just did.
+ * never interleaves with a user command). Each transport command returns its
+ * ack frame; transport samples that do not reach it ({@link reflects}) are
+ * ignored, so a slow poll never undoes what the user just did.
  */
 export function usePlayer() {
   const [opened, setOpened] = useState<OpenedSong | null>(null);
@@ -90,8 +91,8 @@ export function usePlayer() {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   /** Transport commands sent whose frame is not known yet. */
   const inFlight = useRef(0);
-  /** Samples rendered before this frame predate the latest command. */
-  const awaitFrame = useRef(0);
+  /** Samples that do not reach this ack frame predate the latest command. */
+  const awaitAck = useRef(0);
   const mounted = useRef(true);
 
   const publishPosition = useCallback((next: TransportSample) => {
@@ -106,7 +107,7 @@ export function usePlayer() {
       if (!mounted.current || !transport || transport.songId !== openedRef.current?.song.id) {
         return;
       }
-      if (inFlight.current > 0 || transport.renderedFrame < awaitFrame.current) return;
+      if (inFlight.current > 0 || !reflects(transport, awaitAck.current)) return;
       intent.current.seek = null;
       intent.current.playing = transport.playing;
       setPlaying(transport.playing);
@@ -136,7 +137,7 @@ export function usePlayer() {
       return enqueue(async () => {
         try {
           const scheduled = await command();
-          if (scheduled) awaitFrame.current = Math.max(awaitFrame.current, scheduled.frame);
+          if (scheduled) awaitAck.current = Math.max(awaitAck.current, scheduled.ackFrame);
         } finally {
           inFlight.current -= 1;
         }
@@ -214,7 +215,7 @@ export function usePlayer() {
             mix: mixes,
             master: intent.current.master,
           };
-          awaitFrame.current = 0;
+          awaitAck.current = 0;
           publishPosition({ positionSecs: startAt, playing: false, heardAt: performance.now() });
           setOpened(song);
           setMix(mixes);
@@ -225,7 +226,7 @@ export function usePlayer() {
           if (startAt > 0) {
             intent.current.seek = startAt;
             const scheduled = await seek(startAt);
-            if (scheduled) awaitFrame.current = Math.max(awaitFrame.current, scheduled.frame);
+            if (scheduled) awaitAck.current = Math.max(awaitAck.current, scheduled.ackFrame);
           }
         } catch {
           if (mounted.current) setOpenError(true);
