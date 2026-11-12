@@ -127,7 +127,9 @@ impl StemModel for VerifiedModel {
                 continue;
             }
             let print = fingerprint(spec_out, wave_out);
-            let agrees = attempt > 0
+            // Only finite results of this chunk count: `fingerprints` and the
+            // previous buffers hold them and nothing else (cleared per chunk).
+            let agrees = !self.fingerprints.is_empty()
                 && (self.fingerprints.contains(&print)
                     || (close(spec_out, &self.previous_spec)
                         && close(wave_out, &self.previous_wave)));
@@ -331,6 +333,84 @@ mod tests {
                 .predict(&[0.1, 0.2], &[], &mut spec_out, &mut wave_out)
                 .is_err()
         );
+    }
+
+    #[derive(Clone, Copy)]
+    enum Run {
+        Right,
+        Nan,
+        /// Finite but wrong, differently every time.
+        Wrong,
+    }
+
+    /// Follows a script of outcomes, one per run across chunks.
+    struct Scripted {
+        script: Vec<Run>,
+        runs: Rc<Cell<usize>>,
+    }
+
+    impl StemModel for Scripted {
+        fn predict(
+            &mut self,
+            mix: &[f32],
+            _spec: &[f32],
+            spec_out: &mut [f32],
+            wave_out: &mut [f32],
+        ) -> Result<(), SeparationError> {
+            let run = self.runs.get();
+            self.runs.set(run + 1);
+            answer(mix, spec_out, wave_out);
+            match self.script.get(run).copied().unwrap_or(Run::Right) {
+                Run::Right => {}
+                Run::Nan => spec_out[2] = f32::NAN,
+                Run::Wrong => spec_out[run % spec_out.len()] += 0.01 * (run + 1) as f32,
+            }
+            Ok(())
+        }
+    }
+
+    fn scripted(script: &[Run]) -> (VerifiedModel, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+        let runs = Rc::new(Cell::new(0));
+        let cpu_runs = Rc::new(Cell::new(0));
+        let loads = cpu_runs.clone();
+        let model = VerifiedModel::new(
+            Box::new(Scripted {
+                script: script.to_vec(),
+                runs: runs.clone(),
+            }),
+            Box::new(move || Ok(Box::new(Cpu(loads.clone())) as Box<dyn StemModel>)),
+        );
+        (model, runs, cpu_runs)
+    }
+
+    #[test]
+    fn a_result_never_agrees_with_an_earlier_chunk() {
+        // Chunk 1 is accepted. Chunk 2 (same input, so the same right answer
+        // as chunk 1's output) gets NaN, one right run, then wrong runs: one
+        // right run of its own is not enough.
+        use Run::*;
+        let (mut model, runs, cpu) = scripted(&[Right, Right, Nan, Right, Wrong, Wrong]);
+        assert_eq!(predict(&mut model), right());
+        assert_eq!((runs.get(), cpu.get()), (2, 0));
+        let (_, wave_out) = predict(&mut model);
+        assert_eq!(wave_out[0], 42.0, "the fallback answered chunk 2");
+        assert_eq!((runs.get(), cpu.get()), (2 + MAX_ATTEMPTS, 1));
+    }
+
+    #[test]
+    fn two_right_runs_after_a_nan_agree() {
+        use Run::*;
+        let (mut model, runs, cpu) = scripted(&[Nan, Right, Right]);
+        assert_eq!(predict(&mut model), right());
+        assert_eq!((runs.get(), cpu.get()), (3, 0));
+    }
+
+    #[test]
+    fn finite_runs_that_always_differ_fall_back_after_four() {
+        let (mut model, runs, cpu) = scripted(&[Run::Wrong; MAX_ATTEMPTS]);
+        let (_, wave_out) = predict(&mut model);
+        assert_eq!(wave_out[0], 42.0);
+        assert_eq!((runs.get(), cpu.get()), (MAX_ATTEMPTS, 1));
     }
 
     #[test]
