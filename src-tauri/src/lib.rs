@@ -4,11 +4,13 @@ pub mod drums;
 pub mod metronome;
 pub mod separation;
 pub mod settings;
+pub mod startup;
 pub mod stems;
 pub mod tuner;
 
 use std::sync::Arc;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, State};
 
 use settings::{Settings, SettingsStore};
@@ -18,6 +20,7 @@ use settings::{Settings, SettingsStore};
 
 #[tauri::command]
 async fn settings_load(store: State<'_, SettingsStore>) -> Result<Settings, String> {
+    startup::mark("screen asked for settings");
     Ok(store.get())
 }
 
@@ -43,6 +46,7 @@ async fn settings_save(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup::begin();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -50,12 +54,19 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .on_page_load(|_, payload| match payload.event() {
+            PageLoadEvent::Started => startup::mark("page load started"),
+            PageLoadEvent::Finished => startup::mark("page load finished"),
+        })
         .setup(|app| {
+            startup::mark("setup started");
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
+            startup::mark("audio service started");
             let metronome = metronome::MetronomeService::start(&data_dir, &audio);
             let drums = drums::DrumService::start(audio.engine(), &data_dir)?;
+            startup::mark("metronome and drum services started");
             app.manage(audio);
             app.manage(metronome);
             app.manage(drums);
@@ -77,8 +88,10 @@ pub fn run() {
                 }),
                 separation::ServiceConfig::APP,
             ));
+            startup::mark("stem and separation services started");
             let tuner = tuner::TunerService::new(app.handle(), &app.state::<SettingsStore>());
             app.manage(tuner);
+            startup::mark("setup finished");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

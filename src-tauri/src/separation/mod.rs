@@ -66,6 +66,7 @@ pub fn load_model(candidates: &[PathBuf]) -> Result<Box<dyn StemModel>, Separati
 /// loaded when first needed.
 #[cfg(target_os = "macos")]
 pub fn load_verified(path: &Path) -> Result<VerifiedModel, SeparationError> {
+    crate::startup::mark("stem model load started");
     log::info!("loading the stem model from {}", path.display());
     let gpu = CoreMlModel::load(path, ComputeUnits::Gpu)?;
     let cpu_path = path.to_path_buf();
