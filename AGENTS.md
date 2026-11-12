@@ -17,6 +17,7 @@
 - 히어로 문구, 앱 소개 문장, 구현 상태나 정책을 설명하는 문장은 절대 넣지 않습니다. 도구 화면 제목 외 설명 문구도 넣지 않습니다.
 - 모든 문구는 `src/locales/ko.json`과 `src/locales/en.json`에 같은 키로 넣습니다(키 불일치는 `src/i18n/i18n.test.ts`가 잡습니다). 컴포넌트에 문자열을 하드코딩하지 않습니다. 언어 이름(`한국어`, `English`)만 예외입니다.
 - 한국어 문구는 `/humanize-korean:humanize-korean` 스킬로 번역투가 없는지 다듬고, 영어도 자연스러운 앱 문구(Title Case 레이블)로 씁니다.
+- 문구를 고친 뒤 `mise exec -- node scripts/collect-copy.mjs --check`로 하드코딩 문구·쓰지 않는 키를 확인합니다. 윤문 입력은 `--ko-text`, 키별 ko/en 표는 인자 없이 실행해 얻습니다.
 
 ## 디자인 규칙
 
