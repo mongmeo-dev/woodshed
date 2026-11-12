@@ -53,11 +53,13 @@
 
 .fretboard-scroll {
   overflow-x: auto;
+  /* The board scrolls inside the card instead of widening the screen. */
+  contain: inline-size;
 }
 
 .fretboard {
-  --board-columns: var(--ws-space-lg)
-    repeat(calc(var(--frets) + 1), minmax(var(--ws-space-xl), 1fr));
+  --column-min: calc(var(--ws-space-lg) + var(--ws-space-xxs));
+  --board-columns: var(--ws-space-lg) repeat(calc(var(--frets) + 1), minmax(var(--column-min), 1fr));
   --row-height: var(--ws-space-xl);
   position: relative;
   min-width: min-content;
