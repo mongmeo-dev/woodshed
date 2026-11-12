@@ -230,6 +230,7 @@ export function StemSplitterScreen() {
                         duration={duration}
                         loop={loop}
                         playing={player.playing}
+                        positionVersion={player.positionVersion}
                         positionNow={positionNow}
                         onSeek={(seconds) => void player.seekTo(seconds)}
                         onLoop={(range) => void player.changeLoop(range)}

@@ -42,6 +42,30 @@ export interface Transport {
   ended: boolean;
   positionSecs: number;
   heardAtMs: number | null;
+  /** Engine frames rendered when sampled; commands scheduled at or before it are reflected. */
+  renderedFrame: number;
+}
+
+/** Engine frame a command's events take effect at. */
+export interface Scheduled {
+  frame: number;
+}
+
+export interface TrackMixIntent {
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+}
+
+/** The screen's whole intent, re-applied on a new output (`stems_restore`). */
+export interface PlayerIntent {
+  playing: boolean;
+  /** A seek that may not have been applied yet. */
+  seek: number | null;
+  speed: number;
+  loop: LoopRange | null;
+  tracks: TrackMixIntent[];
+  master: number;
 }
 
 export type ImportStage = "download" | "extract" | "decode";
@@ -198,32 +222,29 @@ export function closeSong(): Promise<void> {
   return call("stems_close", {}, undefined);
 }
 
-export function play(): Promise<void> {
-  return call("stems_play", {}, undefined);
+export function play(): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_play", {}, null);
 }
 
-export function pause(): Promise<void> {
-  return call("stems_pause", {}, undefined);
+export function pause(): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_pause", {}, null);
 }
 
-export function seek(seconds: number): Promise<void> {
-  return call("stems_seek", { seconds }, undefined);
+export function seek(seconds: number): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_seek", { seconds }, null);
 }
 
 /** 0.5–1.0; pitch is kept. */
-export function setSpeed(speed: number): Promise<void> {
-  return call("stems_set_speed", { speed }, undefined);
+export function setSpeed(speed: number): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_set_speed", { speed }, null);
 }
 
-export function setLoop(range: LoopRange | null): Promise<void> {
-  return call("stems_set_loop", { range }, undefined);
+export function setLoop(range: LoopRange | null): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_set_loop", { range }, null);
 }
 
-export function setTrack(
-  index: number,
-  mix: { volume: number; muted: boolean; solo: boolean },
-): Promise<void> {
-  return call("stems_set_track", { index, ...mix }, undefined);
+export function setTrack(index: number, mix: TrackMixIntent): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_set_track", { index, ...mix }, null);
 }
 
 export function setMaster(volume: number): Promise<void> {
@@ -234,9 +255,12 @@ export function getTransport(): Promise<Transport | null> {
   return call<Transport | null>("stems_transport", {}, null);
 }
 
-/** After `audio://output-changed`: drops events pending for the old output. */
-export function resync(): Promise<void> {
-  return call("stems_resync", {}, undefined);
+/**
+ * After `audio://output-changed`: drops events pending for the old output and
+ * schedules the whole intent again in one step.
+ */
+export function restore(intent: PlayerIntent): Promise<Scheduled | null> {
+  return call<Scheduled | null>("stems_restore", { intent }, null);
 }
 
 export async function onSeparation(

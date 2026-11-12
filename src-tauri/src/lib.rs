@@ -68,7 +68,7 @@ pub fn run() {
             stems::stems_set_track,
             stems::stems_set_master,
             stems::stems_transport,
-            stems::stems_resync,
+            stems::stems_restore,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Woodshed")

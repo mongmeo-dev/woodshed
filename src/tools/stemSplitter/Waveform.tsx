@@ -36,6 +36,8 @@ interface WaveformProps {
   duration: number;
   loop: LoopRange | null;
   playing: boolean;
+  /** Changes whenever the position moves outside playback (seek, poll). */
+  positionVersion: number;
   positionNow: () => number;
   onSeek: (seconds: number) => void;
   onLoop: (range: LoopRange) => void;
@@ -52,6 +54,7 @@ export function Waveform({
   duration,
   loop,
   playing,
+  positionVersion,
   positionNow,
   onSeek,
   onLoop,
@@ -101,10 +104,15 @@ export function Waveform({
 
   useAnimationFrame(playing, draw);
 
-  // While paused: redraw on data, size and theme changes.
+  // A new position (seek, transport poll) is drawn even while paused.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: positionVersion is the redraw trigger.
   useEffect(() => {
     draw();
     setShownPosition(positionNow());
+  }, [draw, positionNow, positionVersion]);
+
+  // While paused: redraw on size and theme changes.
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(draw);
@@ -118,7 +126,7 @@ export function Waveform({
       themes.disconnect();
       scheme?.removeEventListener("change", draw);
     };
-  }, [draw, positionNow]);
+  }, [draw]);
 
   // Keep the accessible value roughly current without re-rendering per frame.
   useEffect(() => {
