@@ -1,0 +1,285 @@
+//! The metronome's own file in the app data directory: the last settings and
+//! the named presets. Kept apart from `settings.json` so it never races the
+//! app settings.
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+use serde::{Deserialize, Serialize};
+
+use super::pattern::MetronomeSettings;
+
+pub const METRONOME_FILE: &str = "metronome.json";
+/// Longest preset name, in characters.
+pub const MAX_PRESET_NAME: usize = 40;
+/// Most presets kept.
+pub const MAX_PRESETS: usize = 100;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preset {
+    pub name: String,
+    pub settings: MetronomeSettings,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MetronomeData {
+    pub settings: MetronomeSettings,
+    pub presets: Vec<Preset>,
+}
+
+impl MetronomeData {
+    /// Normalizes every setting and drops unusable or duplicate presets.
+    fn normalized(self) -> Self {
+        let mut presets: Vec<Preset> = Vec::new();
+        for preset in self.presets {
+            let Some(name) = clean_name(&preset.name) else {
+                continue;
+            };
+            if presets.iter().any(|kept| kept.name == name) || presets.len() >= MAX_PRESETS {
+                continue;
+            }
+            presets.push(Preset {
+                name,
+                settings: preset.settings.normalized(),
+            });
+        }
+        Self {
+            settings: self.settings.normalized(),
+            presets,
+        }
+    }
+}
+
+/// Why a preset could not be saved or deleted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, thiserror::Error)]
+#[serde(tag = "code", rename_all = "camelCase")]
+pub enum PresetError {
+    #[error("the preset name is empty")]
+    EmptyName,
+    #[error("the preset name is longer than {MAX_PRESET_NAME} characters")]
+    NameTooLong,
+    #[error("there are already {MAX_PRESETS} presets")]
+    TooMany,
+    #[error("cannot write the presets: {message}")]
+    SaveFailed { message: String },
+}
+
+/// Trims the name; `None` when nothing is left.
+fn clean_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+pub struct MetronomeStore {
+    path: PathBuf,
+    data: Mutex<MetronomeData>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl MetronomeStore {
+    /// Loads `dir/metronome.json`. A missing or unreadable file yields defaults.
+    pub fn load(dir: &Path) -> Self {
+        let path = dir.join(METRONOME_FILE);
+        let data = match fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str::<MetronomeData>(&text).unwrap_or_else(|error| {
+                log::warn!("metronome file is invalid, using defaults: {error}");
+                MetronomeData::default()
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => MetronomeData::default(),
+            Err(error) => {
+                log::warn!("cannot read the metronome file, using defaults: {error}");
+                MetronomeData::default()
+            }
+        };
+        Self {
+            path,
+            data: Mutex::new(data.normalized()),
+        }
+    }
+
+    pub fn get(&self) -> MetronomeData {
+        lock(&self.data).clone()
+    }
+
+    /// Replaces the last-used settings in memory. [`Self::save`] writes them.
+    pub fn set_settings(&self, settings: MetronomeSettings) {
+        lock(&self.data).settings = settings.normalized();
+    }
+
+    /// Writes everything atomically (temp file + rename).
+    pub fn save(&self) -> io::Result<()> {
+        let data = self.get();
+        write_atomically(&self.path, &data)
+    }
+
+    /// Saves `settings` under `name`, replacing a preset of the same name.
+    pub fn save_preset(
+        &self,
+        name: &str,
+        settings: MetronomeSettings,
+    ) -> Result<Vec<Preset>, PresetError> {
+        let name = clean_name(name).ok_or(PresetError::EmptyName)?;
+        if name.chars().count() > MAX_PRESET_NAME {
+            return Err(PresetError::NameTooLong);
+        }
+        let mut data = lock(&self.data);
+        let mut next = data.clone();
+        let preset = Preset {
+            name,
+            settings: settings.normalized(),
+        };
+        match next
+            .presets
+            .iter()
+            .position(|kept| kept.name == preset.name)
+        {
+            Some(index) => next.presets[index] = preset,
+            None if next.presets.len() >= MAX_PRESETS => return Err(PresetError::TooMany),
+            None => next.presets.push(preset),
+        }
+        self.commit(&mut data, next)
+    }
+
+    /// Deletes the preset called `name` (nothing happens if there is none).
+    pub fn delete_preset(&self, name: &str) -> Result<Vec<Preset>, PresetError> {
+        let mut data = lock(&self.data);
+        let mut next = data.clone();
+        next.presets.retain(|preset| preset.name != name);
+        self.commit(&mut data, next)
+    }
+
+    /// Writes `next` and only then makes it current, so a failed write
+    /// leaves memory and disk agreeing.
+    fn commit(
+        &self,
+        data: &mut MetronomeData,
+        next: MetronomeData,
+    ) -> Result<Vec<Preset>, PresetError> {
+        write_atomically(&self.path, &next).map_err(|error| PresetError::SaveFailed {
+            message: error.to_string(),
+        })?;
+        *data = next;
+        Ok(data.presets.clone())
+    }
+}
+
+fn write_atomically(path: &Path, data: &MetronomeData) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let text = serde_json::to_string_pretty(data).map_err(io::Error::other)?;
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, text)?;
+    fs::rename(&temp, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("woodshed-metronome-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn at(bpm: f64) -> MetronomeSettings {
+        MetronomeSettings {
+            bpm,
+            ..MetronomeSettings::default()
+        }
+    }
+
+    #[test]
+    fn missing_file_loads_defaults() {
+        let dir = temp_dir("missing");
+        assert_eq!(MetronomeStore::load(&dir).get(), MetronomeData::default());
+    }
+
+    #[test]
+    fn presets_save_load_replace_and_delete() {
+        let dir = temp_dir("presets");
+        let store = MetronomeStore::load(&dir);
+        store.save_preset("  Warm up ", at(80.0)).unwrap();
+        store.save_preset("Shuffle", at(96.0)).unwrap();
+        let presets = store.save_preset("Warm up", at(84.5)).unwrap();
+        assert_eq!(
+            presets
+                .iter()
+                .map(|p| (p.name.as_str(), p.settings.bpm))
+                .collect::<Vec<_>>(),
+            vec![("Warm up", 84.5), ("Shuffle", 96.0)]
+        );
+
+        let reloaded = MetronomeStore::load(&dir);
+        assert_eq!(reloaded.get().presets, presets);
+
+        let presets = reloaded.delete_preset("Warm up").unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(MetronomeStore::load(&dir).get().presets, presets);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn invalid_names_are_rejected() {
+        let dir = temp_dir("names");
+        let store = MetronomeStore::load(&dir);
+        assert_eq!(
+            store.save_preset("   ", at(90.0)),
+            Err(PresetError::EmptyName)
+        );
+        let long = "가".repeat(MAX_PRESET_NAME + 1);
+        assert_eq!(
+            store.save_preset(&long, at(90.0)),
+            Err(PresetError::NameTooLong)
+        );
+        assert!(
+            store
+                .save_preset(&"가".repeat(MAX_PRESET_NAME), at(90.0))
+                .is_ok()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_settings_are_saved_and_normalized_on_load() {
+        let dir = temp_dir("settings");
+        let store = MetronomeStore::load(&dir);
+        store.set_settings(at(133.3));
+        store.save().unwrap();
+        assert_eq!(MetronomeStore::load(&dir).get().settings.bpm, 133.3);
+
+        fs::write(
+            dir.join(METRONOME_FILE),
+            r#"{"settings":{"bpm":9000,"beats":3},"presets":[{"name":"","settings":{}},{"name":"a","settings":{"subdivision":99}}]}"#,
+        )
+        .unwrap();
+        let data = MetronomeStore::load(&dir).get();
+        assert_eq!(data.settings.bpm, 400.0);
+        assert_eq!(data.settings.accents.len(), 3);
+        assert_eq!(data.presets.len(), 1);
+        assert_eq!(data.presets[0].settings.subdivision, 8);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_previous_presets() {
+        let dir = temp_dir("readonly");
+        fs::create_dir_all(&dir).unwrap();
+        // A directory where the file should be makes the rename fail.
+        fs::create_dir_all(dir.join(METRONOME_FILE)).unwrap();
+        let store = MetronomeStore::load(&dir);
+        let result = store.save_preset("x", at(90.0));
+        assert!(matches!(result, Err(PresetError::SaveFailed { .. })));
+        assert!(store.get().presets.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
