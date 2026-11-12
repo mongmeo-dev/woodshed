@@ -7,6 +7,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::tuner::TunerSettings;
+
 pub const SETTINGS_FILE: &str = "settings.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub struct Settings {
     /// `None` follows the system default output.
     pub output_device_id: Option<String>,
     pub theme: Theme,
+    pub tuner: TunerSettings,
 }
 
 pub struct SettingsStore {
@@ -111,6 +114,7 @@ mod tests {
             language: Some(Language::En),
             output_device_id: Some("coreaudio:BuiltInSpeakerDevice".into()),
             theme: Theme::Dark,
+            ..Settings::default()
         };
         SettingsStore::load(&dir).save(settings.clone()).unwrap();
         assert_eq!(SettingsStore::load(&dir).get(), settings);
@@ -126,6 +130,7 @@ mod tests {
         assert_eq!(settings.language, Some(Language::Ko));
         assert_eq!(settings.theme, Theme::System);
         assert_eq!(settings.output_device_id, None);
+        assert_eq!(settings.tuner, TunerSettings::default());
         let _ = fs::remove_dir_all(&dir);
     }
 
