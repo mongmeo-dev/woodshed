@@ -60,13 +60,20 @@ impl Source for Click {
 
 ### 붙이고 예약하기
 
-- `handle.add_source(Box::new(src), gain) -> SourceId` — `prepare` 후 믹서에 붙음. 소스별 게인(선형, 약 5ms 글라이드)은 `set_gain`, 마스터는 `set_master_gain`.
+- `handle.add_source(Box::new(src), gain) -> Result<SourceId, EngineError>` — `prepare` 후 믹서에 붙음. 살아 있는 소스(붙었거나 큐에 있는 것)가 `max_sources`면 `EngineError::MixerFull`로 거절되고 소스는 호출한 스레드에서 해제됩니다. 오디오 스레드는 소스를 해제하지 않고 모두 핸들로 돌려보내며, 핸들이 명령마다(`collect_retired`) 해제합니다. 소스별 게인(선형, 약 5ms 글라이드)은 `set_gain`, 마스터는 `set_master_gain`.
 - `handle.schedule(frame, id, kind)` — 절대 샘플 프레임(`FramePos`, 엔진 생성 후 누적, 장치를 바꿔도 리셋 안 됨)에 이벤트 예약. 그 프레임 이전에 큐에 들어오면 0프레임 오차로 렌더됩니다. 이미 렌더된 프레임이면 다음 프레임에 렌더되고 `stats().late_events`가 늘어납니다.
 - `handle.frame_after(lead_secs)` — 지금 렌더 위치 + 여유. 실시간 예약은 최소 한 콜백(64프레임 ≈ 1.3ms) 이상 앞서, 보통 20~50ms 앞서 넣습니다.
 - `handle.schedule_notify(...)` — 렌더 후 `RenderedEvent`를 보고합니다(화면 동기용).
 - `handle.cancel(id, from_frame)` — 그 프레임 이후 대기 이벤트 제거(정지·템포 변경 시).
 - `EventKind`: `Trigger { note, velocity }`, `Start`, `Stop`, `Seek { frame }`, `Param { id, value }`.
-- 용량: 소스 64, 대기 이벤트 4096, 명령 큐 4096(`EngineConfig`). 넘치면 버리고 `stats()`의 `dropped_*`가 늘어납니다.
+- 용량: 소스 64, 대기 이벤트 4096, 명령 큐 4096(`EngineConfig`). 큐가 차면 `EngineError::QueueFull`, 예약이 차면 이벤트를 버리고 `stats().dropped_events`가 늘어납니다.
+
+### 출력 세대와 포맷 변경
+
+- 출력 스트림을 (다시) 열 때마다 엔진이 새 포맷으로 `reformat`되고 **세대**(`handle.generation()`, `stats().generation`)가 1 늘어납니다. 이때 이미 붙은 소스와 큐에 대기 중인 소스 모두 새 포맷으로 `prepare`됩니다(일반 스레드, 스트림이 멈춘 동안).
+- 프레임 시계는 이어지지만 샘플레이트가 바뀔 수 있으므로, 이전 세대에 계산한 예약 프레임은 시간상 위치가 달라집니다. 메트로놈·드럼·스템 플레이어는 `audio://output-changed`를 받으면 `cancel` 후 새 `sampleRate`로 다시 예약합니다.
+- 새 세대의 첫 콜백 전에는 `handle.timing()`·`audio_heard_at`이 `None`/`null`입니다.
+- 출력 버퍼는 64프레임 이상 중 기기가 허용하는 최솟값입니다(64프레임 하한은 기기별 드롭아웃 방지용, 48kHz에서 약 1.3ms).
 
 ### 앱에서 엔진 쓰기
 
@@ -77,7 +84,7 @@ impl Source for Click {
 
 - 오디오 콜백이 콜백 시작 프레임과 그 프레임의 DAC 도달 시각(스트림 클럭, 출력 레이턴시 포함)을 seqlock으로 게시합니다.
 - `AudioEngine::heard_at_epoch_ms(frame)` — 프레임이 들리는 Unix epoch ms. 명령 `audio_heard_at`.
-- `notify` 이벤트는 `audio_subscribe(onEvent: Channel<PlaybackEvent>)`로 등록한 채널에 `{ sourceId, scheduledFrame, renderedFrame, kind, heardAtMs }`로 옵니다. 프런트는 `src/lib/audio.ts`의 `onPlaybackEvent`로 받고, `delayUntilHeard(heardAtMs)`(= `heardAtMs - performance.timeOrigin - performance.now()`) 뒤에 그립니다. 예제: 설정 화면 테스트음(`useHeardBeat`).
+- `notify` 이벤트는 `audio_subscribe(onEvent: Channel<PlaybackEvent>)`로 등록한 채널에 `{ sourceId, scheduledFrame, renderedFrame, kind, generation, heardAtMs }`로 옵니다. `heardAtMs`는 렌더 당시 타이밍으로 계산하며, 이전 세대에 렌더된 알림은 보내지 않습니다. 프런트는 `src/lib/audio.ts`의 `onPlaybackEvent`로 받고, `delayUntilHeard(heardAtMs)`(= `heardAtMs - performance.timeOrigin - performance.now()`) 뒤에 그립니다. 예제: 설정 화면 테스트음(`useHeardBeat`).
 - 미리 아는 프레임(메트로놈 박 등)은 예약 시점에 `audio_heard_at`으로 시각을 받아 미리 애니메이션을 걸 수 있습니다.
 
 ### 입력 (튜너)
@@ -86,9 +93,14 @@ impl Source for Click {
 - `open_input(&InputRequest { device_id, channel: InputChannel::Single(0) | MixDown, target_buffer_frames: 64, ring_frames })` → `InputCapture { samples: rtrb::Consumer<f32>, info, shared }`. 모노 f32 샘플을 일반 스레드에서 읽습니다. `shared.overflows()`, `capture_latency_ns()`, `take_error()` 제공. `InputCapture`를 drop하면 멈춥니다.
 - macOS 마이크 권한 문구는 `src-tauri/Info.plist`에 있습니다.
 
-### 장치 변경
+### 장치 변경과 출력 복구
 
-- `spawn_device_monitor(interval, hook)`가 장치 목록을 폴링해 바뀌면 `hook(&DeviceSnapshot)`을 부릅니다. 앱은 `audio://devices-changed` 이벤트를 프런트로 내보내고, 현재 출력이 사라졌거나 스트림 오류가 나면 저장된 장치(실패 시 기본 장치)로 다시 엽니다. 입력을 쓰는 노드는 이 이벤트를 받아 입력을 다시 엽니다.
+- `spawn_device_monitor(interval, hook)`가 1초마다 `hook(&DeviceSnapshot, changed)`를 부릅니다(`changed`는 목록이 바뀐 틱).
+- 이벤트는 둘로 나뉩니다.
+  - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 경우에만. 입력을 쓰는 노드는 이를 받아 입력을 다시 엽니다.
+  - `audio://output-changed` (`{ generation, deviceId, sampleRate, channels, bufferFrames }`): 출력 스트림을 (다시) 연 모든 경우(수동 전환, 시스템 기본 장치 추종, 오류 복구) 성공 시. 프런트는 `onOutputChanged`로 받습니다.
+- 매 틱 `reopen_reason`(`src-tauri/src/audio/recovery.rs`)으로 출력 부재·스트림 오류·장치 분리·기본 장치 변경(시스템 기본값 모드)·선호 장치 복귀·장치 샘플레이트 변경을 검사해 저장된 장치(실패 시 기본 장치)로 다시 엽니다. 실패하면 1초부터 30초까지 두 배씩 간격을 늘려 재시도합니다.
+- 출력 장치 선택 명령(`audio_set_output_device`)은 설정 저장까지 합니다.
 
 ### 오프라인 렌더 (테스트)
 
