@@ -346,8 +346,8 @@ impl Worker {
     fn run_job(&self, song_id: &str, cancel: &AtomicBool, stft: &Stft, loaded: &mut Loaded) {
         let started = Instant::now();
         let result = (|| {
+            // `separate` already sent `running` with no progress.
             job::mark(&self.library, song_id, StemStatus::Running)?;
-            self.set_progress(song_id, None);
             let (model, work) = self.ensure_loaded(loaded)?;
             if cancel.load(Ordering::Relaxed) {
                 return Err(SeparationError::Cancelled);
