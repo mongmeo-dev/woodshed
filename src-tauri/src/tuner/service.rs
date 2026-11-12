@@ -416,10 +416,8 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
 }
 
 fn save(store: &SettingsStore, update: impl FnOnce(&mut TunerSettings)) -> Result<(), TunerError> {
-    let mut settings = store.get();
-    update(&mut settings.tuner);
     store
-        .save(settings)
+        .update(|settings| update(&mut settings.tuner))
         .map(|_| ())
         .map_err(|error| TunerError::SaveFailed {
             message: error.to_string(),
