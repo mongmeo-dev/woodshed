@@ -4,6 +4,8 @@
 //!
 //! ```sh
 //! cargo run --release --example separate_wav -- <in.wav> <out_dir>
+//! # Measure without writing stems (long files):
+//! cargo run --release --example separate_wav -- --discard <in.wav>
 //! ```
 //!
 //! The model is found as in the app's dev builds (`WOODSHED_STEM_MODEL`,
@@ -21,7 +23,7 @@ use woodshed_lib::separation::{
     locate_model, model_candidates, read_song,
 };
 
-/// Float stems at the model rate, stereo.
+/// Float stems at the model rate, stereo (none with `--discard`).
 struct FloatStems {
     writers: Vec<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
     chunks: usize,
@@ -46,11 +48,14 @@ impl SeparationOutput for FloatStems {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [input, out_dir] = args.as_slice() else {
-        return Err("usage: separate_wav <in.wav> <out_dir>".into());
+    let (input, out_dir) = match args.as_slice() {
+        [flag, input] if flag == "--discard" => (input, None),
+        [input, out_dir] => (input, Some(PathBuf::from(out_dir))),
+        _ => return Err("usage: separate_wav (<in.wav> <out_dir> | --discard <in.wav>)".into()),
     };
-    let out_dir = PathBuf::from(out_dir);
-    std::fs::create_dir_all(&out_dir)?;
+    if let Some(dir) = &out_dir {
+        std::fs::create_dir_all(dir)?;
+    }
     let candidates = model_candidates(
         Some(Path::new(env!("CARGO_MANIFEST_DIR"))),
         default_cache_dir().as_deref(),
@@ -78,10 +83,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let writers = MODEL_STEMS
-        .iter()
-        .map(|name| hound::WavWriter::create(out_dir.join(format!("{}.wav", name.as_str())), spec))
-        .collect::<Result<Vec<_>, _>>()?;
+    let writers = match &out_dir {
+        Some(dir) => MODEL_STEMS
+            .iter()
+            .map(|name| hound::WavWriter::create(dir.join(format!("{}.wav", name.as_str())), spec))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => Vec::new(),
+    };
     let mut output = FloatStems { writers, chunks: 0 };
     let started = Instant::now();
     work.separate(
