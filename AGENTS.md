@@ -8,7 +8,7 @@
 - 커밋·push 전에 `mise run check`를 통과시킵니다. 내용: `biome check` → `tsc --noEmit` → `vitest run --maxWorkers=2` → `cargo fmt --check` → `cargo clippy --all-targets --locked -D warnings` → `cargo test --locked`.
   - 웹만: `mise run check:web`, Rust만: `mise run check:rust`.
 - 이 Mac은 다른 프로젝트와 공유합니다. 무거운 명령(빌드·전체 검사)은 한 번에 하나만 돌리고, `CARGO_BUILD_JOBS=4`(mise env에 설정됨), vitest는 `--maxWorkers=2`를 씁니다. 개발 서버·빌드한 앱은 확인 후 종료합니다.
-- 앱 빌드: `mise exec -- pnpm tauri build` → `src-tauri/target/release/bundle/macos/Woodshed.app`.
+- 앱 빌드: `mise run app`(`scripts/build-app.sh`: 로컬 서명 인증서가 있으면 그것으로, 없으면 ad-hoc 서명) → `src-tauri/target/release/bundle/macos/Woodshed.app`. 인증서는 `mise run signing-cert`로 만들며 운영자 키체인 검색 목록을 바꾸므로 운영자 확인 뒤에만 실행합니다(README 로컬 서명).
 - 실제 출력 장치 레이턴시 확인: `cd src-tauri && mise exec -- cargo run --release --example latency_probe` (스피커로 짧은 클릭음이 납니다).
 
 ## 화면 문구 규칙
@@ -17,6 +17,7 @@
 - 히어로 문구, 앱 소개 문장, 구현 상태나 정책을 설명하는 문장은 절대 넣지 않습니다. 도구 화면 제목 외 설명 문구도 넣지 않습니다.
 - 모든 문구는 `src/locales/ko.json`과 `src/locales/en.json`에 같은 키로 넣습니다(키 불일치는 `src/i18n/i18n.test.ts`가 잡습니다). 컴포넌트에 문자열을 하드코딩하지 않습니다. 언어 이름(`한국어`, `English`)만 예외입니다.
 - 한국어 문구는 `/humanize-korean:humanize-korean` 스킬로 번역투가 없는지 다듬고, 영어도 자연스러운 앱 문구(Title Case 레이블)로 씁니다.
+- 문구를 고친 뒤 `mise exec -- node scripts/collect-copy.mjs --check`로 하드코딩 문구·쓰지 않는 키를 확인합니다. 윤문 입력은 `--ko-text`, 키별 ko/en 표는 인자 없이 실행해 얻습니다.
 
 ## 디자인 규칙
 
@@ -108,7 +109,12 @@ impl Source for Click {
   - `OnTarget`: 선호 장치(없으면 시스템 기본값)로 재생 중. 매 틱 출력 부재·스트림 오류(Xrun 제외)·장치 분리·기본 장치 변경(기본값 모드만)·장치 샘플레이트 변경을 검사해 처음부터 다시 엽니다.
   - `Fallback { preferred_retry }`: 선호 장치를 쓸 수 없어 기본값으로 재생 중. 선호 복귀 시도는 백오프(실패마다 1→30초 두 배)로만 하고, 폴백이 정상이면 건드리지 않습니다.
   - `Failed { retry }`: 아무것도 열리지 않음. 같은 백오프로 재시도.
-  - 백오프는 장치 목록 변경·사용자 선택·선호 장치 성공 때만 초기화됩니다.
+  - 백오프는 장치 목록 변경·사용자 선택·선호 장치 성공·마이크 응답 때만 초기화됩니다.
+- 마이크 응답 대기: 열려는 장치나 시스템 기본 출력 장치에 입력이 있고(스냅샷 `inputs`에 같은 id) 마이크 권한이 아직 미결정이면, macOS는 출력 스트림 생성을 사용자가 권한 창에 답할 때까지 붙잡습니다(cpal AUHAL은 생성자에서 기본 출력 장치에 먼저 연결하므로 입력 없는 장치를 골라도 같음).
+  - 관리자는 이때 백엔드(`OutputEnv::open`)를 부르지 않고 그 열기를 바로 실패로 처리하므로, 관리자 스레드는 CoreAudio 호출에 묶이지 않고 장치 감시·선택·종료를 그대로 처리합니다. 판단은 `OutputEnv::microphone_answered`(AVCaptureDevice 권한 상태)로 합니다.
+  - 목표(선호 장치, 없으면 기본값)가 재생 중이 아니고 열기가 이렇게 막혀 있으면 대기 상태입니다. 대기가 시작될 때 `OutputEnv::waiting_for_microphone(true)`가 권한 창을 띄우고(튜너와 같은 창), 응답 콜백이 `ManagerRequest::Recheck`로 관리자를 깨웁니다. 깨어난 검사는 백오프와 상관없이 목표를 처음부터 엽니다(`Starting`).
+  - 대기 중에도 입력 없는 기본 출력은 그대로 재생합니다. 거부해도 열기는 진행됩니다(입력만 무음).
+  - `audio_status().waitingForMicrophone`이 대기 여부이고, 설정 화면은 이때 출력 칸에 '마이크 접근을 허용하세요'만 보입니다.
 - 출력 교체: 새 스트림을 엔진 락 밖에서 빌드(`OutputStarter`)하고, `commit_output`에서 이전 스트림을 일시정지 → reformat → 새 스트림 재생 순으로 바꿉니다. 빌드가 실패하면 기존 출력은 손대지 않습니다. 새 스트림 재생이 실패하면 코어를 이전 포맷·세대로 되돌리고 이전 스트림을 다시 재생합니다. 어느 실패든 세대는 바뀌지 않습니다.
 - 장치 목록은 틱과 선택 모두 같은 경로(`observe_devices`)로 관찰하므로, 어느 입력이 먼저 보든 변경 알림은 한 번 나갑니다.
 - 이벤트 불변식.

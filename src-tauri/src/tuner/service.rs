@@ -163,6 +163,7 @@ impl TunerService {
     }
 
     fn start(&self, settings: TunerSettings, sink: Channel<TunerEvent>) {
+        crate::startup::mark("tuner started");
         *lock(&self.shared.sink) = Some(sink);
         let mut worker = lock(&self.worker);
         if worker.as_ref().is_some_and(|w| !w.thread.is_finished()) {
@@ -232,6 +233,7 @@ impl InputEnv for CpalInputEnv {
             channels: capture.info.channels,
             channel,
         };
+        crate::startup::mark("tuner input opened");
         log::info!(
             "tuner input: device=\"{}\" sample_rate={} channels={} channel={:?} buffer={:?}",
             opened.device_name,
@@ -387,8 +389,12 @@ fn run(shared: &Shared, settings: &TunerSettings, inbox: &mpsc::Receiver<Command
             permission = permission::status();
             if permission == MicPermission::Undetermined && !asked {
                 asked = true;
+                crate::startup::mark("tuner asked for microphone access");
                 let answered = Arc::clone(&shared.permission_answered);
-                permission::request(move |_| answered.store(true, Ordering::Relaxed));
+                permission::request(move |_| {
+                    crate::startup::mark("microphone prompt answered");
+                    answered.store(true, Ordering::Relaxed);
+                });
             }
         }
         match (permission, started) {

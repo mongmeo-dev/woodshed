@@ -6,6 +6,8 @@ import { SettingsScreen } from "./SettingsScreen";
 
 /** The app's running preference, as audio_status reports it. */
 let runningPreferred: string | null = null;
+/** audio_status: no output yet, held for the microphone answer. */
+let waitingForMicrophone = false;
 const setOutputDevice = vi.fn();
 
 vi.mock("../lib/audio", async (importOriginal) => {
@@ -16,14 +18,16 @@ vi.mock("../lib/audio", async (importOriginal) => {
       { id: "coreaudio:C", name: "Interface", isDefault: false, channels: 2, sampleRate: 48_000 },
     ],
     getAudioStatus: async () => ({
-      output: {
-        deviceId: "coreaudio:A",
-        deviceName: "Speakers",
-        sampleRate: 48_000,
-        channels: 2,
-        requestedBufferFrames: 64,
-        bufferFrames: 64,
-      },
+      output: waitingForMicrophone
+        ? null
+        : {
+            deviceId: "coreaudio:A",
+            deviceName: "Speakers",
+            sampleRate: 48_000,
+            channels: 2,
+            requestedBufferFrames: 64,
+            bufferFrames: 64,
+          },
       outputLatencyMs: 3.5,
       stats: {
         generation: 1,
@@ -34,6 +38,7 @@ vi.mock("../lib/audio", async (importOriginal) => {
         droppedEvents: 0,
       },
       preferredDeviceId: runningPreferred,
+      waitingForMicrophone,
     }),
     setOutputDevice: (deviceId: string | null) => setOutputDevice(deviceId),
   };
@@ -41,6 +46,7 @@ vi.mock("../lib/audio", async (importOriginal) => {
 
 beforeEach(async () => {
   runningPreferred = null;
+  waitingForMicrophone = false;
   setOutputDevice.mockReset();
   await i18n.changeLanguage("en");
 });
@@ -99,4 +105,16 @@ test("after a timeout the screen follows the state the app ends up in", async ()
   // The manager finishes the switch later; the next status poll shows it.
   runningPreferred = "coreaudio:C";
   await waitFor(() => expect(select.value).toBe("coreaudio:C"), { timeout: 2500 });
+});
+
+test("while macOS holds the output for the microphone answer, the screen asks for access", async () => {
+  waitingForMicrophone = true;
+  backendApplies(() => Promise.reject({ code: "openFailed", message: "waiting" }));
+  await chooseInterface();
+  await waitFor(() => expect(setOutputDevice).toHaveBeenCalledWith("coreaudio:C"));
+  expect(await screen.findByRole("status")).toHaveProperty(
+    "textContent",
+    "Allow microphone access",
+  );
+  expect(screen.queryByText("Can't open the output device")).toBeNull();
 });

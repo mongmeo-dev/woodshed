@@ -27,6 +27,14 @@ run = [
 description = "Fetch yt-dlp and build ffmpeg (stem splitter sidecars)"
 run = "sh scripts/fetch-binaries.sh"
 
+[tasks.app]
+description = "Build Woodshed.app (signed with the local signing identity when it exists)"
+run = "sh scripts/build-app.sh"
+
+[tasks.signing-cert]
+description = "Create the local code-signing identity that keeps macOS permissions across rebuilds"
+run = "sh scripts/create-local-signing-cert.sh"
+
 [tasks.stem-model]
 description = "Download htdemucs_6s weights and build the Core ML stem model"
 run = "sh tools/stem-model/build.sh"
