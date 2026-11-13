@@ -118,6 +118,7 @@ export function SettingsScreen() {
   const [outputError, setOutputError] = useState<OutputSelectError["code"] | null>(null);
   const language = i18n.language;
   const output = status?.output ?? null;
+  const waitingForMicrophone = status?.waitingForMicrophone ?? false;
 
   // The running preference from the app is the truth; it also catches up
   // with a choice whose request timed out but completed later.
@@ -183,14 +184,22 @@ export function SettingsScreen() {
                   ))}
                 </select>
               </div>
-              {(outputError === "openFailed" ||
-                outputError === "unavailable" ||
-                (status && !output)) && (
+              {waitingForMicrophone ? (
                 <div className="row">
-                  <span className="row-error" role="alert">
-                    {t("settings.output.notAvailable")}
+                  <span className="row-error" role="status">
+                    {t("tuner.status.permissionPending")}
                   </span>
                 </div>
+              ) : (
+                (outputError === "openFailed" ||
+                  outputError === "unavailable" ||
+                  (status && !output)) && (
+                  <div className="row">
+                    <span className="row-error" role="alert">
+                      {t("settings.output.notAvailable")}
+                    </span>
+                  </div>
+                )
               )}
               {outputError === "saveFailed" && (
                 <div className="row">
