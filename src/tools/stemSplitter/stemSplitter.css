@@ -327,21 +327,23 @@
   user-select: none;
 }
 
-.stems .waveform[data-over-loop] {
+/* The cursor shows what a press grabs; while dragging, the drag decides. */
+.stems .waveform[data-zone="inside"] {
   cursor: grab;
+}
+
+.stems .waveform[data-zone="start"],
+.stems .waveform[data-zone="end"],
+.stems .waveform[data-drag="resize"] {
+  cursor: ew-resize;
 }
 
 .stems .waveform[data-drag="move"] {
   cursor: grabbing;
 }
 
-.stems .waveform[data-drag="resize"] {
-  cursor: ew-resize;
-}
-
-/* While dragging, the drag's cursor wins over what is under the pointer. */
-.stems .waveform[data-drag] * {
-  cursor: inherit;
+.stems .waveform[data-drag="select"] {
+  cursor: auto;
 }
 
 .stems .waveform-view {
@@ -373,7 +375,7 @@
 
 .stems .ruler-tick {
   position: absolute;
-  top: 8px;
+  top: var(--ws-space-xs);
   transform: translateX(-50%);
   white-space: nowrap;
 }
@@ -390,7 +392,7 @@
 .stems .ruler-tick::before {
   content: "";
   position: absolute;
-  top: -8px;
+  top: calc(-1 * var(--ws-space-xs));
   left: 50%;
   width: 1px;
   height: 4px;
@@ -404,8 +406,8 @@
 .stems .ruler-time {
   position: absolute;
   z-index: 1;
-  top: 2px;
-  padding: 3px var(--ws-space-xxs);
+  top: 0;
+  padding: var(--ws-space-xxs);
   border: 1px solid var(--ws-color-hairline);
   border-radius: var(--ws-radius-sm);
   background: var(--ws-color-canvas);
@@ -444,15 +446,16 @@
   pointer-events: none;
 }
 
-/* A loop edge on the waveform: a wide target around a thin line with a grip.
-   It stops above the ruler so the ruler labels stay clear. */
+/* A loop edge on the waveform: a thin line with a grip, stopping above the
+   ruler so its labels stay clear. Presses are judged by position on the
+   waveform (timeline.ts loopZoneAt), so the edge itself takes no pointer. */
 .stems .loop-handle {
   position: absolute;
   top: 0;
   width: 16px;
   height: var(--waveform-height);
-  margin-left: -8px;
-  cursor: ew-resize;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .stems .loop-handle:focus-visible {

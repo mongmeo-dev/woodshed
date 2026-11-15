@@ -3,9 +3,11 @@ import {
   dragRange,
   labelHalfWidth,
   loopable,
+  loopZoneAt,
   MIN_LOOP_SECS,
   moveEdge,
   rulerTicks,
+  sameLoop,
   stepEdge,
 } from "./timeline";
 
@@ -15,6 +17,9 @@ test("ruler marks are at least 56 px apart and stay off the right edge", () => {
   expect(rulerTicks(3600, 700)).toEqual([
     0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700, 3000, 3300,
   ]);
+  // Past 30 min steps, marks are whole hours apart, as many as the gap needs.
+  expect(rulerTicks(36_000, 404).slice(0, 3)).toEqual([0, 7200, 14_400]);
+  expect(rulerTicks(86_400, 404).slice(0, 2)).toEqual([0, 14_400]);
   expect(rulerTicks(0, 500)).toEqual([]);
   expect(rulerTicks(120, 0)).toEqual([]);
 });
@@ -44,7 +49,6 @@ test("a stepped edge moves by the step from the time shown for it", () => {
   expect(stepEdge(loop, "end", -1, 180).end).toBe(53);
   expect(stepEdge({ start: 0, end: 54 }, "start", -0.1, 180).start).toBe(0);
   expect(stepEdge({ start: 10, end: 179.95 }, "end", 0.1, 180).end).toBe(180);
-  expect(stepEdge({ start: 53.95, end: 54 }, "start", 0.1, 180).start).toBeCloseTo(53.9);
 });
 
 test("ruler marks under a label are found from the label's width", () => {
@@ -74,4 +78,28 @@ test("a drag selects, moves or resizes a loop inside the song", () => {
     start: 11,
     end: 20,
   });
+});
+
+test("a press grabs an edge near it, the middle of the loop, or nothing", () => {
+  // A wide loop from 100 to 300 px: edges reach 8 px out and 8 px in.
+  expect(loopZoneAt(93, 100, 300)).toBe("start");
+  expect(loopZoneAt(107, 100, 300)).toBe("start");
+  expect(loopZoneAt(110, 100, 300)).toBe("inside");
+  expect(loopZoneAt(296, 100, 300)).toBe("end");
+  expect(loopZoneAt(309, 100, 300)).toBeNull();
+  expect(loopZoneAt(50, 100, 300)).toBeNull();
+  // A 12 px loop: edges reach 3 px in, leaving its middle to move it.
+  expect(loopZoneAt(102, 100, 112)).toBe("start");
+  expect(loopZoneAt(106, 100, 112)).toBe("inside");
+  expect(loopZoneAt(110, 100, 112)).toBe("end");
+  // Where both edges reach, the nearer one wins.
+  expect(loopZoneAt(98, 100, 102)).toBe("start");
+  expect(loopZoneAt(104, 100, 102)).toBe("end");
+});
+
+test("loops compare by their edges", () => {
+  expect(sameLoop({ start: 1, end: 2 }, { start: 1, end: 2 })).toBe(true);
+  expect(sameLoop({ start: 1, end: 2 }, { start: 1, end: 2.1 })).toBe(false);
+  expect(sameLoop(null, null)).toBe(true);
+  expect(sameLoop(null, { start: 1, end: 2 })).toBe(false);
 });

@@ -19,6 +19,31 @@ const MIN_TICK_GAP_PX = 56;
 const TICK_EDGE_PX = 24;
 /** Float noise allowed when comparing a loop length with MIN_LOOP_SECS. */
 const LENGTH_EPSILON = 1e-6;
+/** How far (px) outside the loop an edge can be grabbed. */
+const EDGE_REACH_PX = 8;
+
+/** What a press at `x` px grabs on a loop drawn from `startX` to `endX` px. */
+export type LoopZone = "start" | "end" | "inside";
+
+/**
+ * Edges reach EDGE_REACH_PX outside the loop, and inside it by a quarter of
+ * the loop's width at most, so a narrow loop keeps a middle that moves it.
+ * Where both edges reach, the nearer one wins.
+ */
+export function loopZoneAt(x: number, startX: number, endX: number): LoopZone | null {
+  const inner = Math.min(EDGE_REACH_PX, (endX - startX) / 4);
+  const nearStart = x >= startX - EDGE_REACH_PX && x <= startX + inner;
+  const nearEnd = x >= endX - inner && x <= endX + EDGE_REACH_PX;
+  if (nearStart && nearEnd) return Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end";
+  if (nearStart) return "start";
+  if (nearEnd) return "end";
+  return x > startX && x < endX ? "inside" : null;
+}
+
+/** Whether two loops are the same (both null counts as the same). */
+export function sameLoop(a: LoopRange | null, b: LoopRange | null): boolean {
+  return a === b || (a !== null && b !== null && a.start === b.start && a.end === b.end);
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -35,7 +60,8 @@ export function rulerTicks(duration: number, width: number): number[] {
   if (!(duration > 0) || !(width > 0)) return [];
   const step =
     TICK_STEPS_SECS.find((seconds) => (seconds / duration) * width >= MIN_TICK_GAP_PX) ??
-    LONGEST_TICK_STEP_SECS;
+    Math.ceil((MIN_TICK_GAP_PX * duration) / width / LONGEST_TICK_STEP_SECS) *
+      LONGEST_TICK_STEP_SECS;
   const last = duration - (TICK_EDGE_PX / width) * duration;
   const ticks: number[] = [];
   for (let index = 0; index * step <= last; index++) ticks.push(index * step);

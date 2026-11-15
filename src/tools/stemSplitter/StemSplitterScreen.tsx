@@ -238,6 +238,7 @@ export function StemSplitterScreen() {
                   </h2>
                   <div className="card player">
                     <Waveform
+                      key={opened.song.id}
                       peaks={opened.waveform}
                       duration={duration}
                       loop={loop}
