@@ -92,9 +92,10 @@ test("a press grabs an edge near it, the middle of the loop, or nothing", () => 
   expect(loopZoneAt(102, 100, 112)).toBe("start");
   expect(loopZoneAt(106, 100, 112)).toBe("inside");
   expect(loopZoneAt(110, 100, 112)).toBe("end");
-  // Where both edges reach, the nearer one wins.
+  // A 2 px loop: each edge still has its outer reach, and a sliver in between moves it.
   expect(loopZoneAt(98, 100, 102)).toBe("start");
   expect(loopZoneAt(104, 100, 102)).toBe("end");
+  expect(loopZoneAt(101, 100, 102)).toBe("inside");
 });
 
 test("loops compare by their edges", () => {

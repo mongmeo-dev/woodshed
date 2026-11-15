@@ -328,6 +328,14 @@
   user-select: none;
 }
 
+/* Takes presses a little past both ends, so an edge at the start or end of
+   the song can be grabbed from outside the waveform as well. */
+.stems .waveform::before {
+  content: "";
+  position: absolute;
+  inset: 0 calc(-1 * var(--ws-space-xs));
+}
+
 /* The cursor shows what a press grabs; while dragging, the drag decides. */
 .stems .waveform[data-zone="inside"] {
   cursor: grab;
