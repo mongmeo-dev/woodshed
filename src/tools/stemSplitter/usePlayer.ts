@@ -288,9 +288,15 @@ export function usePlayer() {
       const valid = range && loopable(range) ? range : null;
       intent.current.loop = valid;
       setLoopState(valid);
-      return sendTransport(() => sendLoop(valid));
+      const sent = sendTransport(() => sendLoop(valid));
+      // The player loops only once playback reaches the loop's end from
+      // before it. Playing past the new end would never loop, so jump in.
+      if (valid && intent.current.playing && positionNow() >= valid.end) {
+        return seekTo(valid.start);
+      }
+      return sent;
     },
-    [sendTransport],
+    [sendTransport, positionNow, seekTo],
   );
 
   const changeTrack = useCallback(

@@ -16,8 +16,11 @@ import {
   type LoopGesture,
   labelHalfWidth,
   loopable,
+  loopZoneAt,
+  MIN_LOOP_SECS,
   moveEdge,
   rulerTicks,
+  sameLoop,
   stepEdge,
 } from "./timeline";
 
@@ -77,18 +80,13 @@ interface WaveformProps {
 
 interface Drag {
   gesture: LoopGesture;
+  pointerId: number;
   x: number;
   moved: boolean;
 }
 
 function token(element: Element, name: string) {
   return getComputedStyle(element).getPropertyValue(name).trim();
-}
-
-function edgeOf(target: EventTarget) {
-  if (!(target instanceof Element)) return null;
-  const edge = target.closest("[data-edge]")?.getAttribute("data-edge");
-  return edge === "start" || edge === "end" ? edge : null;
 }
 
 export function Waveform({
@@ -107,6 +105,9 @@ export function Waveform({
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<Drag | null>(null);
+  /** An edge moved by a held arrow key, sent when the key is released. */
+  const keyDraft = useRef<LoopRange | null>(null);
+  const handles = useRef<Partial<Record<LoopEdge, HTMLDivElement | null>>>({});
   const [draft, setDraft] = useState<LoopRange | null>(null);
   const [dragKind, setDragKind] = useState<LoopGesture["kind"] | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -207,6 +208,13 @@ export function Waveform({
     return ratio * duration;
   };
 
+  /** What a press at `seconds` grabs on the loop, judged in pixels. */
+  const zoneAt = (seconds: number) => {
+    if (!loop || duration <= 0 || width <= 0) return null;
+    const px = (value: number) => (value / duration) * width;
+    return loopZoneAt(px(seconds), px(loop.start), px(loop.end));
+  };
+
   const endDrag = () => {
     drag.current = null;
     setDraft(null);
@@ -218,16 +226,20 @@ export function Waveform({
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const at = secondsAt(event.clientX);
-    const edge = edgeOf(event.target);
-    const gesture: LoopGesture =
-      loop && edge
-        ? { kind: "resize", edge, from: at, origin: loop }
-        : loop && at >= loop.start && at <= loop.end
-          ? { kind: "move", from: at, origin: loop }
-          : { kind: "select", from: at };
+    const zone = zoneAt(at);
+    let gesture: LoopGesture = { kind: "select", from: at };
+    if (loop && (zone === "start" || zone === "end")) {
+      gesture = { kind: "resize", edge: zone, from: at, origin: loop };
+      // The grabbed edge takes the keys next (instead of the position).
+      event.preventDefault();
+      handles.current[zone]?.focus({ preventScroll: true });
+    } else if (loop && zone === "inside") {
+      gesture = { kind: "move", from: at, origin: loop };
+    }
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    drag.current = { gesture, x: event.clientX, moved: false };
+    drag.current = { gesture, pointerId: event.pointerId, x: event.clientX, moved: false };
     setDraft(null);
+    setDragKind(gesture.kind);
     setHover(null);
   };
 
@@ -238,17 +250,24 @@ export function Waveform({
       setHover(at);
       return;
     }
+    if (event.pointerId !== current.pointerId) return;
+    // The release was missed (another app took the pointer): drop the drag.
+    if ((event.buttons & 1) === 0) {
+      endDrag();
+      return;
+    }
     if (!current.moved) {
       if (Math.abs(event.clientX - current.x) < DRAG_THRESHOLD_PX) return;
       current.moved = true;
-      setDragKind(current.gesture.kind);
     }
-    setDraft(dragRange(current.gesture, at, duration));
+    const range = dragRange(current.gesture, at, duration);
+    // A new loop shows once it is long enough to be one.
+    setDraft(current.gesture.kind !== "select" || loopable(range) ? range : null);
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
-    if (!current) return;
+    if (!current || event.pointerId !== current.pointerId) return;
     const at = secondsAt(event.clientX);
     endDrag();
     if (!current.moved) {
@@ -256,15 +275,15 @@ export function Waveform({
       return;
     }
     const range = dragRange(current.gesture, at, duration);
-    if (loopable(range)) onLoop(range);
+    if (loopable(range) && !sameLoop(range, loop)) onLoop(range);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const now = positionNow();
     const target =
-      event.key === "ArrowLeft"
+      event.key === "ArrowLeft" || event.key === "ArrowDown"
         ? now - SEEK_STEP_SECS
-        : event.key === "ArrowRight"
+        : event.key === "ArrowRight" || event.key === "ArrowUp"
           ? now + SEEK_STEP_SECS
           : event.key === "Home"
             ? 0
@@ -278,33 +297,51 @@ export function Waveform({
 
   const onEdgeKeyDown = (edge: LoopEdge, event: KeyboardEvent<HTMLDivElement>) => {
     if (!loop) return;
+    const from = keyDraft.current ?? loop;
     const step = event.shiftKey ? EDGE_SHIFT_STEP_SECS : EDGE_STEP_SECS;
     let next: LoopRange;
     switch (event.key) {
       case "ArrowLeft":
       case "ArrowDown":
-        next = stepEdge(loop, edge, -step, duration);
+        next = stepEdge(from, edge, -step, duration);
         break;
       case "ArrowRight":
       case "ArrowUp":
-        next = stepEdge(loop, edge, step, duration);
+        next = stepEdge(from, edge, step, duration);
         break;
       case "Home":
-        next = moveEdge(loop, edge, 0, duration);
+        next = moveEdge(from, edge, 0, duration);
         break;
       case "End":
-        next = moveEdge(loop, edge, duration, duration);
+        next = moveEdge(from, edge, duration, duration);
         break;
       default:
         return;
     }
     event.preventDefault();
-    if (next.start !== loop.start || next.end !== loop.end) onLoop(next);
+    // Every loop change restarts playback with a short fade, so a held key
+    // only shows the edge moving and sends where it stops.
+    if (event.repeat) {
+      keyDraft.current = next;
+      setDraft(next);
+      return;
+    }
+    keyDraft.current = null;
+    setDraft(null);
+    if (!sameLoop(next, loop)) onLoop(next);
+  };
+
+  const onEdgeKeyUp = () => {
+    const next = keyDraft.current;
+    if (!next) return;
+    keyDraft.current = null;
+    setDraft(null);
+    if (loop && !sameLoop(next, loop)) onLoop(next);
   };
 
   const region = draft ?? loop;
   const percent = (seconds: number) => (duration > 0 ? (seconds / duration) * 100 : 0);
-  const overLoop = hover !== null && loop !== null && hover >= loop.start && hover <= loop.end;
+  const zone = hover !== null ? zoneAt(hover) : null;
   const ticks = rulerTicks(duration, width);
   const tickLabels = ticks.map((seconds) => timeText(seconds));
 
@@ -339,11 +376,14 @@ export function Waveform({
     <div
       className="waveform"
       data-drag={dragKind ?? undefined}
-      data-over-loop={overLoop || undefined}
+      data-zone={zone ?? undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={endDrag}
+      onLostPointerCapture={() => {
+        if (drag.current) endDrag();
+      }}
       onPointerLeave={() => {
         if (!drag.current) setHover(null);
       }}
@@ -401,21 +441,29 @@ export function Waveform({
       )}
       {region &&
         EDGES.map((edge) => {
-          const [min, max] = edge === "start" ? [0, region.end] : [region.start, duration];
+          const [min, max] =
+            edge === "start"
+              ? [0, region.end - MIN_LOOP_SECS]
+              : [region.start + MIN_LOOP_SECS, duration];
           return (
             <div
               key={edge}
+              ref={(element) => {
+                handles.current[edge] = element;
+              }}
               className="loop-handle"
               data-edge={edge}
               role="slider"
               tabIndex={loop ? 0 : -1}
               aria-label={edge === "start" ? labels.loopStart : labels.loopEnd}
-              aria-valuemin={Math.round(min)}
-              aria-valuemax={Math.round(max)}
+              aria-valuemin={Number(min.toFixed(1))}
+              aria-valuemax={Number(max.toFixed(1))}
               aria-valuenow={Number(region[edge].toFixed(1))}
               aria-valuetext={preciseTimeText(region[edge])}
               style={{ left: `${percent(region[edge])}%` }}
               onKeyDown={(event) => onEdgeKeyDown(edge, event)}
+              onKeyUp={onEdgeKeyUp}
+              onBlur={onEdgeKeyUp}
             />
           );
         })}
