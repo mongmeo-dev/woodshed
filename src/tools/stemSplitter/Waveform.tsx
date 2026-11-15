@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   useCallback,
@@ -8,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { LoopRange } from "../../lib/stems";
+import { coveredTicks, labelHalfWidth, rulerTicks } from "./timeline";
 
 /** Runs `frame` on every animation frame while `active`. */
 export function useAnimationFrame(active: boolean, frame: () => void) {
@@ -29,7 +31,15 @@ const BAR_WIDTH = 2;
 const BAR_GAP = 1;
 /** Pointer travel that turns a click into a loop selection. */
 const DRAG_THRESHOLD_PX = 4;
-const KEY_STEP_SECS = 5;
+/** Arrow keys on the playback position. */
+const SEEK_STEP_SECS = 5;
+/** Room a ruler label keeps around its text (padding, border) and from marks beside it. */
+const RULER_LABEL_PADDING_PX = 6;
+const RULER_LABEL_GAP_PX = 4;
+
+interface WaveformLabels {
+  position: string;
+}
 
 interface WaveformProps {
   peaks: number[];
@@ -41,8 +51,12 @@ interface WaveformProps {
   positionNow: () => number;
   onSeek: (seconds: number) => void;
   onLoop: (range: LoopRange) => void;
-  label: string;
-  valueText: (seconds: number) => string;
+  labels: WaveformLabels;
+  /** The playback position and ruler marks. */
+  timeText: (seconds: number) => string;
+  /** The time under the pointer and the loop being selected. */
+  preciseTimeText: (seconds: number) => string;
+  rangeText: (range: LoopRange) => string;
 }
 
 function token(element: Element, name: string) {
@@ -58,12 +72,16 @@ export function Waveform({
   positionNow,
   onSeek,
   onLoop,
-  label,
-  valueText,
+  labels,
+  timeText,
+  preciseTimeText,
+  rangeText,
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{ x: number; seconds: number } | null>(null);
   const [draft, setDraft] = useState<LoopRange | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const [width, setWidth] = useState(0);
   const [shownPosition, setShownPosition] = useState(0);
 
   const draw = useCallback(() => {
@@ -102,7 +120,16 @@ export function Waveform({
     context.fillRect(Math.min(Math.max(playX - 1, 0), width - 2), 0, 2, height);
   }, [peaks, duration, positionNow]);
 
+  /** The drawn width, for the ruler marks. */
+  const measure = useCallback(() => {
+    const next = canvasRef.current?.getBoundingClientRect().width ?? 0;
+    setWidth((current) => (Math.abs(current - next) < 0.5 ? current : next));
+  }, []);
+
   useAnimationFrame(playing, draw);
+
+  // The first ruler is laid out before the first paint.
+  useLayoutEffect(measure, [measure]);
 
   // A new position (seek, transport poll) is drawn even while paused.
   // biome-ignore lint/correctness/useExhaustiveDependencies: positionVersion is the redraw trigger.
@@ -115,7 +142,13 @@ export function Waveform({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(draw);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            draw();
+            measure();
+          });
     observer?.observe(canvas);
     const themes = new MutationObserver(draw);
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -126,7 +159,7 @@ export function Waveform({
       themes.disconnect();
       scheme?.removeEventListener("change", draw);
     };
-  }, [draw]);
+  }, [draw, measure]);
 
   // Keep the accessible value roughly current without re-rendering per frame.
   useEffect(() => {
@@ -150,12 +183,17 @@ export function Waveform({
     event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = { x: event.clientX, seconds: secondsAt(event.clientX) };
     setDraft(null);
+    setHover(null);
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const start = drag.current;
-    if (!start || Math.abs(event.clientX - start.x) < DRAG_THRESHOLD_PX) return;
     const seconds = secondsAt(event.clientX);
+    const start = drag.current;
+    if (!start) {
+      setHover(seconds);
+      return;
+    }
+    if (Math.abs(event.clientX - start.x) < DRAG_THRESHOLD_PX) return;
     setDraft({ start: Math.min(start.seconds, seconds), end: Math.max(start.seconds, seconds) });
   };
 
@@ -175,9 +213,9 @@ export function Waveform({
     const now = positionNow();
     const target =
       event.key === "ArrowLeft"
-        ? now - KEY_STEP_SECS
+        ? now - SEEK_STEP_SECS
         : event.key === "ArrowRight"
-          ? now + KEY_STEP_SECS
+          ? now + SEEK_STEP_SECS
           : event.key === "Home"
             ? 0
             : event.key === "End"
@@ -190,17 +228,39 @@ export function Waveform({
 
   const region = draft ?? loop;
   const percent = (seconds: number) => (duration > 0 ? (seconds / duration) * 100 : 0);
+  const ticks = rulerTicks(duration, width);
+  const tickLabels = ticks.map((seconds) => timeText(seconds));
+
+  // One label on the ruler: the range while dragging, else the pointer time.
+  // It is centred on its time but kept inside the ruler, and hides the marks under it.
+  const rulerLabel = draft
+    ? { text: rangeText(draft), seconds: (draft.start + draft.end) / 2, range: true }
+    : hover !== null
+      ? { text: preciseTimeText(hover), seconds: hover, range: false }
+      : null;
+  const labelHalf = rulerLabel ? labelHalfWidth(rulerLabel.text, RULER_LABEL_PADDING_PX) : 0;
+  const labelStyle: CSSProperties | undefined = rulerLabel
+    ? {
+        left: `clamp(${labelHalf}px, ${percent(rulerLabel.seconds)}%, calc(100% - ${labelHalf}px))`,
+      }
+    : undefined;
+  const covered = rulerLabel
+    ? coveredTicks(
+        ticks,
+        tickLabels,
+        Math.min(
+          Math.max((percent(rulerLabel.seconds) / 100) * width, labelHalf),
+          width - labelHalf,
+        ),
+        labelHalf + RULER_LABEL_GAP_PX,
+        duration,
+        width,
+      )
+    : null;
 
   return (
     <div
       className="waveform"
-      role="slider"
-      tabIndex={0}
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={Math.round(duration)}
-      aria-valuenow={Math.round(shownPosition)}
-      aria-valuetext={valueText(shownPosition)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -208,8 +268,47 @@ export function Waveform({
         drag.current = null;
         setDraft(null);
       }}
-      onKeyDown={onKeyDown}
+      onPointerLeave={() => {
+        if (!drag.current) setHover(null);
+      }}
     >
+      <div className="waveform-view">
+        <div
+          className="waveform-track"
+          role="slider"
+          tabIndex={0}
+          aria-label={labels.position}
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
+          aria-valuenow={Math.round(shownPosition)}
+          aria-valuetext={timeText(shownPosition)}
+          onKeyDown={onKeyDown}
+        >
+          <canvas ref={canvasRef} className="waveform-canvas" />
+        </div>
+      </div>
+      <div className="waveform-ruler" aria-hidden="true">
+        {ticks.map((seconds, index) => (
+          <span
+            key={seconds}
+            className="ruler-tick"
+            data-first={seconds === 0 || undefined}
+            data-covered={covered?.has(seconds) || undefined}
+            style={{ left: `${percent(seconds)}%` }}
+          >
+            {tickLabels[index]}
+          </span>
+        ))}
+        {rulerLabel && (
+          <span
+            className="ruler-time"
+            data-range={rulerLabel.range || undefined}
+            style={labelStyle}
+          >
+            {rulerLabel.text}
+          </span>
+        )}
+      </div>
       {region && (
         <div
           className="waveform-loop"
@@ -221,7 +320,9 @@ export function Waveform({
           }}
         />
       )}
-      <canvas ref={canvasRef} className="waveform-canvas" />
+      {hover !== null && !draft && (
+        <div className="waveform-hover" aria-hidden="true" style={{ left: `${percent(hover)}%` }} />
+      )}
     </div>
   );
 }

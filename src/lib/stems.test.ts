@@ -1,5 +1,6 @@
 import {
   formatTime,
+  formatTimePrecise,
   importErrorCode,
   isAudioFile,
   positionAt,
@@ -65,6 +66,14 @@ test("times show as m:ss", () => {
   expect(formatTime(0)).toBe("0:00");
   expect(formatTime(61.9)).toBe("1:01");
   expect(formatTime(3_725)).toBe("1:02:05");
+});
+
+test("loop times show tenths of a second", () => {
+  expect(formatTimePrecise(0)).toBe("0:00.0");
+  expect(formatTimePrecise(18.04)).toBe("0:18.0");
+  expect(formatTimePrecise(54.1)).toBe("0:54.1");
+  expect(formatTimePrecise(59.96)).toBe("1:00.0");
+  expect(formatTimePrecise(3_725.25)).toBe("1:02:05.3");
 });
 
 test("import errors and file types are recognised", () => {

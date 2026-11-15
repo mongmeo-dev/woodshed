@@ -482,11 +482,11 @@ test("dragging on the waveform sets the A-B loop, a click seeks", async () => {
   await waitFor(() =>
     expect(called("stems_set_loop").at(-1)).toEqual({ range: { start: 18, end: 54 } }),
   );
-  expect(screen.getByText("Loop 0:18–0:54")).toBeTruthy();
+  expect(screen.getByText("Loop 0:18.0–0:54.0")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear Loop" }));
   await waitFor(() => expect(called("stems_set_loop").at(-1)).toEqual({ range: null }));
-  expect(screen.queryByText("Loop 0:18–0:54")).toBeNull();
+  expect(screen.queryByText("Loop 0:18.0–0:54.0")).toBeNull();
 
   fireEvent.pointerDown(wave, { button: 0, clientX: 500, pointerId: 1 });
   fireEvent.pointerUp(wave, { clientX: 500, pointerId: 1 });
@@ -499,6 +499,47 @@ test("waveform keys seek and a loop can be cleared", async () => {
   fireEvent.keyDown(position, { key: "End" });
   await waitFor(() => expect(called("stems_seek").at(-1)).toEqual({ seconds: 180 }));
   expect(screen.queryByRole("button", { name: "Clear Loop" })).toBeNull();
+});
+
+/** The waveform as 1000 px wide, so 100 px is 18 s of the 180 s song. */
+function mockWaveformWidth() {
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 1000,
+    bottom: 112,
+    width: 1000,
+    height: 112,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
+
+test("the waveform shows a time ruler, the time under the pointer and the range being dragged", async () => {
+  mockWaveformWidth();
+  await renderOpened();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  const waveform = position.closest(".waveform");
+  const ruler = waveform?.querySelector<HTMLElement>(".waveform-ruler");
+  if (!waveform || !ruler) throw new Error("no waveform ruler");
+  // Every 15 s on a 1000 px waveform; the end mark would be cut off.
+  for (const mark of ["0:00", "0:15", "1:30", "2:45"]) {
+    expect(within(ruler).getByText(mark)).toBeTruthy();
+  }
+  expect(within(ruler).queryByText("3:00")).toBeNull();
+
+  fireEvent.pointerMove(position, { clientX: 250, pointerId: 1 });
+  expect(screen.getByText("0:45.0")).toBeTruthy();
+  fireEvent.pointerLeave(waveform);
+  expect(screen.queryByText("0:45.0")).toBeNull();
+
+  fireEvent.pointerDown(position, { button: 0, clientX: 100, pointerId: 1 });
+  fireEvent.pointerMove(position, { clientX: 300, pointerId: 1 });
+  expect(screen.getByText("0:18.0–0:54.0")).toBeTruthy();
+  fireEvent.pointerUp(position, { clientX: 300, pointerId: 1 });
+  expect(screen.queryByText("0:18.0–0:54.0")).toBeNull();
+  expect(await screen.findByText("Loop 0:18.0–0:54.0")).toBeTruthy();
 });
 
 test("a link that is not a YouTube video shows a short error", async () => {

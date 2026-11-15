@@ -298,7 +298,8 @@
       "time": "{{position}} / {{duration}}",
       "speed": "속도",
       "loopRange": "반복 {{start}}–{{end}}",
-      "loopClear": "반복 해제"
+      "loopClear": "반복 해제",
+      "timeRange": "{{start}}–{{end}}"
     },
     "mixer": {
       "title": "믹서",

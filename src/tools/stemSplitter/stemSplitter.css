@@ -302,17 +302,90 @@
   padding-top: var(--ws-space-md);
 }
 
+/* The waveform column: the waveform, the time ruler under it, and the loop
+   and pointer line laid over both. */
 .stems .waveform {
+  --waveform-height: 112px;
   position: relative;
-  height: 112px;
-  border-radius: var(--ws-radius-sm);
   touch-action: none;
+  user-select: none;
+}
+
+.stems .waveform-view {
+  position: relative;
+  height: var(--waveform-height);
+}
+
+.stems .waveform-track {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--ws-radius-sm);
 }
 
 .stems .waveform-canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.stems .waveform-ruler {
+  position: relative;
+  height: 22px;
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-fine-size);
+  letter-spacing: var(--ws-type-fine-tracking);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.stems .ruler-tick {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.stems .ruler-tick[data-first] {
+  transform: none;
+}
+
+/* Under the pointer time or the dragged range. */
+.stems .ruler-tick[data-covered] {
+  visibility: hidden;
+}
+
+.stems .ruler-tick::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 1px;
+  height: 4px;
+  background: var(--ws-color-hairline);
+}
+
+.stems .ruler-tick[data-first]::before {
+  left: 0;
+}
+
+.stems .ruler-time {
+  position: absolute;
+  z-index: 1;
+  top: 2px;
+  padding: 3px var(--ws-space-xxs);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.stems .ruler-time[data-range] {
+  border-color: var(--ws-color-accent);
+  background: var(--ws-color-accent);
+  color: var(--ws-color-on-accent);
 }
 
 .stems .waveform-loop {
@@ -327,6 +400,15 @@
 
 .stems .waveform-loop[data-draft="true"] {
   opacity: 0.08;
+}
+
+.stems .waveform-hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ws-color-text-tertiary);
+  pointer-events: none;
 }
 
 .stems .player-controls {

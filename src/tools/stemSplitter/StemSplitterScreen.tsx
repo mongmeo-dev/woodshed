@@ -5,7 +5,9 @@ import { inTauri } from "../../lib/ipc";
 import {
   cancelSeparation,
   formatTime,
+  formatTimePrecise,
   isAudioFile,
+  type LoopRange,
   pickAudioFile,
   type SeparationEvent,
   separationFromStems,
@@ -204,6 +206,14 @@ export function StemSplitterScreen() {
 
   const speedPercent = Math.round(player.speed * 100);
   const loop = player.loop;
+  const rangeText = useCallback(
+    (range: LoopRange) =>
+      t("stems.player.timeRange", {
+        start: formatTimePrecise(range.start),
+        end: formatTimePrecise(range.end),
+      }),
+    [t],
+  );
 
   return (
     <section className="screen" aria-labelledby="screen-title-stemSplitter">
@@ -236,8 +246,10 @@ export function StemSplitterScreen() {
                       positionNow={positionNow}
                       onSeek={(seconds) => void player.seekTo(seconds)}
                       onLoop={(range) => void player.changeLoop(range)}
-                      label={t("stems.player.position")}
-                      valueText={formatTime}
+                      labels={{ position: t("stems.player.position") }}
+                      timeText={formatTime}
+                      preciseTimeText={formatTimePrecise}
+                      rangeText={rangeText}
                     />
                     <div className="player-controls">
                       <button
@@ -255,8 +267,8 @@ export function StemSplitterScreen() {
                         <span className="loop-chip">
                           <span>
                             {t("stems.player.loopRange", {
-                              start: formatTime(loop.start),
-                              end: formatTime(loop.end),
+                              start: formatTimePrecise(loop.start),
+                              end: formatTimePrecise(loop.end),
                             })}
                           </span>
                           <button
