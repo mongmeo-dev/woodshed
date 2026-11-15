@@ -70,6 +70,15 @@ fn bundled_program_notices_are_present() {
 }
 
 #[test]
+fn stem_model_weights_are_noticed_as_non_commercial() {
+    let readme = read("README.md");
+    assert!(readme.contains("presumed to be under CC BY-NC"));
+    assert!(readme.contains("for non-commercial use only"));
+    assert!(readme.contains("829d21890023800713e5dd231c67e43ecc06069b"));
+    assert!(readme.contains("Attribution: Meta Demucs"));
+}
+
+#[test]
 fn the_bundle_carries_the_licenses_directory() {
     let config: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"))
