@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { TOOL_IDS, type ViewId } from "../tools/tools";
+import { UpdateButton } from "../updater/UpdateButton";
 import { ViewIcon } from "./icons";
 import { useGlide } from "./useGlide";
 
@@ -56,6 +57,7 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
           <NavItem view="settings" active={active === "settings"} onSelect={onSelect} />
         </ul>
       </nav>
+      <UpdateButton />
     </aside>
   );
 }

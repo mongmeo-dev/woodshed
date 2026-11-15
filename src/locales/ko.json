@@ -117,6 +117,17 @@
       "light": "라이트",
       "dark": "다크"
     },
+    "updates": {
+      "section": "업데이트",
+      "version": "현재 버전",
+      "status": "상태",
+      "check": "업데이트 확인",
+      "checking": "확인 중",
+      "upToDate": "최신 버전",
+      "available": "새 버전 {{version}}",
+      "checkFailed": "업데이트를 확인하지 못했습니다",
+      "installFailed": "업데이트를 설치하지 못했습니다"
+    },
     "saveFailed": "설정을 저장하지 못했습니다"
   },
   "drumMachine": {
@@ -340,5 +351,10 @@
       "failed": "곡을 불러오지 못했습니다",
       "open": "곡을 열 수 없습니다"
     }
+  },
+  "updates": {
+    "install": "업데이트 설치",
+    "downloading": "내려받는 중 {{percent}}%",
+    "downloadingUnknown": "내려받는 중"
   }
 }
