@@ -1,0 +1,63 @@
+import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import { inTauri } from "./ipc";
+
+/**
+ * A newer release found in latest.json (plugins.updater in tauri.conf.json).
+ * The plugin verifies the downloaded archive against plugins.updater.pubkey
+ * before installing; a bad signature rejects `install`.
+ */
+export interface AvailableUpdate {
+  version: string;
+  /** Downloads, verifies and installs, then restarts the app. `fraction` is 0–1, or null while the size is unknown. */
+  install: (onProgress: (fraction: number | null) => void) => Promise<void>;
+}
+
+/**
+ * Test builds only (`VITE_UPDATE_AUTO_INSTALL=1` at build time): installs a
+ * found update without a click. Release builds leave it unset, and the bundler
+ * drops the branch.
+ */
+export const AUTO_INSTALL = import.meta.env.VITE_UPDATE_AUTO_INSTALL === "1";
+
+/** Updates work only inside the Tauri app. */
+export function updatesSupported(): boolean {
+  return inTauri();
+}
+
+export async function currentVersion(): Promise<string | null> {
+  if (!updatesSupported()) return null;
+  return getVersion();
+}
+
+/** The newer release, or null when this version is the latest. Rejects when the check fails. */
+export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  if (!updatesSupported()) return null;
+  const update = await check();
+  if (!update) return null;
+  return {
+    version: update.version,
+    install: async (onProgress) => {
+      let total = 0;
+      let received = 0;
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            total = event.data.contentLength ?? 0;
+            received = 0;
+            onProgress(total > 0 ? 0 : null);
+            break;
+          case "Progress":
+            received += event.data.chunkLength;
+            onProgress(total > 0 ? Math.min(received / total, 1) : null);
+            break;
+          case "Finished":
+            onProgress(1);
+            break;
+        }
+      });
+      await relaunch();
+    },
+  };
+}

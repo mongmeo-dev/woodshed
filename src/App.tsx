@@ -9,31 +9,34 @@ import { MetronomeScreen } from "./tools/metronome/MetronomeScreen";
 import { StemSplitterScreen } from "./tools/stemSplitter/StemSplitterScreen";
 import type { ViewId } from "./tools/tools";
 import { TunerScreen } from "./tools/tuner/TunerScreen";
+import { UpdaterProvider } from "./updater/UpdaterProvider";
 
 export function App() {
   const [view, setView] = useState<ViewId>("tuner");
   return (
     <SettingsProvider>
-      <div className="shell">
-        <Sidebar active={view} onSelect={setView} />
-        <main>
-          {view === "settings" ? (
-            <SettingsScreen />
-          ) : view === "metronome" ? (
-            <MetronomeScreen />
-          ) : view === "tuner" ? (
-            <TunerScreen />
-          ) : view === "drumMachine" ? (
-            <DrumMachineScreen />
-          ) : view === "stemSplitter" ? (
-            <StemSplitterScreen />
-          ) : view === "fretboard" ? (
-            <FretboardScreen />
-          ) : (
-            <ToolScreen tool={view} />
-          )}
-        </main>
-      </div>
+      <UpdaterProvider>
+        <div className="shell">
+          <Sidebar active={view} onSelect={setView} />
+          <main>
+            {view === "settings" ? (
+              <SettingsScreen />
+            ) : view === "metronome" ? (
+              <MetronomeScreen />
+            ) : view === "tuner" ? (
+              <TunerScreen />
+            ) : view === "drumMachine" ? (
+              <DrumMachineScreen />
+            ) : view === "stemSplitter" ? (
+              <StemSplitterScreen />
+            ) : view === "fretboard" ? (
+              <FretboardScreen />
+            ) : (
+              <ToolScreen tool={view} />
+            )}
+          </main>
+        </div>
+      </UpdaterProvider>
     </SettingsProvider>
   );
 }
