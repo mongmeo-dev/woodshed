@@ -74,6 +74,22 @@ sh scripts/create-updater-key.sh   # 한 번. 이미 있으면 다시 만들지 
 - **세 파일을 함께 백업하세요**(암호 관리자나 암호화한 외장 저장소 등, 저장소 밖). 개인키나 암호를 잃으면 새 업데이트에 서명할 수 없고, 이미 설치된 앱은 더 이상 업데이트되지 않습니다. 키를 새로 만들면 사용자가 새 버전을 직접 받아 설치해야 합니다.
 - 릴리스 빌드는 `TAURI_SIGNING_PRIVATE_KEY`(키 파일 경로나 내용)와 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`로 이 키를 넘깁니다. 경로 변수는 `scripts/release-signing.sh`의 `WOODSHED_UPDATER_KEY`, `WOODSHED_UPDATER_KEY_PASSWORD_FILE`입니다.
 - 업데이트 파일(`bundle.createUpdaterArtifacts`)은 빌드할 때 개인키가 있어야 하므로 기본 설정에 넣지 않습니다. `mise run app`은 키 없이 빌드됩니다.
+- 앱은 실행 3초 뒤 한 번 확인하고(실패는 조용히 넘김), 새 버전이 있으면 사이드바 아래에 '업데이트 설치' 버튼을 보입니다. 설치는 누를 때만 하고, 끝나면 앱이 다시 시작됩니다.
+
+#### 로컬 서버로 업데이트 확인
+
+출시 설정을 바꾸지 않고 테스트 전용 `--config`로 확인합니다.
+
+1. 테스트 설정 JSON: `plugins.updater.endpoints`를 `["http://127.0.0.1:<포트>/latest.json"]`, `plugins.updater.dangerousInsecureTransportProtocol`을 `true`로 둡니다. 이전 버전 후보에는 `{"version": "0.0.9"}`처럼 낮은 버전을, 새 버전에는 `{"bundle": {"createUpdaterArtifacts": true}}`를 더 줍니다.
+2. `VITE_UPDATE_AUTO_INSTALL=1`로 빌드하면 화면 클릭 없이 찾은 업데이트를 바로 설치합니다(테스트 전용, 기본 빌드에서는 번들러가 이 분기를 지웁니다).
+
+   ```sh
+   VITE_UPDATE_AUTO_INSTALL=1 sh scripts/build-app.sh --config test.json --config old.json   # 후보를 임시 폴더로 복사
+   TAURI_SIGNING_PRIVATE_KEY="$(cat …/updater.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat …/updater-key-password)" \
+     VITE_UPDATE_AUTO_INSTALL=1 sh scripts/build-app.sh --config test.json --config new.json
+   ```
+3. `Woodshed.app.tar.gz`와 `.sig` 내용으로 `latest.json`(`platforms.darwin-aarch64.{signature,url}`)을 만들어 `python3 -m http.server`로 내려주고, 후보를 `open -g -n`으로 엽니다. 업데이트되면 `~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`에 `Woodshed 0.0.9 started` 다음 `Woodshed 0.1.0 started`가 남습니다.
+4. 후보는 운영 앱과 같은 앱 데이터 폴더를 쓰므로 실행 전에 백업하고 끝나면 되돌립니다. 빌드가 남긴 `target/release/bundle`의 테스트 설정 앱은 지웁니다.
 
 ### 첫 실행과 마이크 권한
 
