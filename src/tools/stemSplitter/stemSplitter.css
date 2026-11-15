@@ -17,12 +17,13 @@
   }
 
   /* With a song open: the player across both columns so the waveform is
-     wide, the library on the left and the mixer on the right. A single
-     column keeps the DOM order: player, mixer, library. */
+     wide, then the mixer on the left and the library on the right, in the
+     DOM (and Tab) order a single column also uses: player, mixer, library. */
   .stems .stems-layout[data-open] {
+    grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
     grid-template-areas:
       "stage stage"
-      "library mixer";
+      "mixer library";
   }
 
   .stems .stems-layout[data-open] .stems-stage {
