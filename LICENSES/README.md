@@ -8,7 +8,7 @@ Woodshed itself is released under the MIT License ([`../LICENSE`](../LICENSE)). 
 | npm packages (React, i18next, …)    | bundled into the web view  | MIT, Apache-2.0 OR MIT                            | [`npm-packages.md`](npm-packages.md), [`npm-packages.txt`](npm-packages.txt) |
 | FFmpeg 9.0.2                        | separate program (sidecar) | LGPL-2.1-or-later                                 | [FFmpeg](#ffmpeg-902), [`ffmpeg-LGPL-2.1.txt`](ffmpeg-LGPL-2.1.txt)          |
 | yt-dlp 2026.10.26 (`yt-dlp_macos`)  | separate program (sidecar) | Unlicense; the bundle as a whole GPL-3.0-or-later | [yt-dlp](#yt-dlp-20261026-yt-dlp_macos)                                      |
-| Demucs `htdemucs_6s` (Core ML)      | bundled resource           | code MIT; **weights: no license grant**           | [Stem separation model](#stem-separation-model-bundled-resource)             |
+| Demucs `htdemucs_6s` (Core ML)      | bundled resource           | code MIT; **weights: presumed CC BY-NC**          | [Stem separation model](#stem-separation-model-bundled-resource)             |
 | Drum samples (VCSL)                 | bundled resource           | CC0-1.0                                           | [`drum-samples.md`](drum-samples.md), [`CC0-1.0.txt`](CC0-1.0.txt)           |
 
 No dependency of the app is under the GPL. The only GPL code shipped is inside the separate `yt-dlp_macos` program, which the app runs as a child process.
@@ -31,11 +31,12 @@ The MPL-2.0 crates (Symphonia, `cssparser`, `selectors` and others) are used unm
 `Contents/Resources/models/htdemucs_6s_fp32.mlmodelc` is a Core ML conversion of the Demucs v4 `htdemucs_6s` model (single model `5c90dfd2`), made by `tools/stem-model/build.sh` from the weights at <https://huggingface.co/adefossez/HTDemucs-6s> (revision `3c5ee475be622df764938de97e4281a7b07ffa58`, `5c90dfd2.safetensors` SHA-256 `d2a1745f0744721f6b8ca5bf469b67c651ea5ed1b52998cab033b2158609d411`).
 
 - Demucs code: MIT License, Copyright (c) Meta Platforms, Inc. and affiliates ([`demucs-MIT.txt`](demucs-MIT.txt)). Source: <https://github.com/adefossez/demucs> (`demucs` 4.1.0 on PyPI).
-- Weights: **no license is granted for them.** The Hugging Face model card has no license field, and the Demucs README ("License" section, <https://github.com/adefossez/demucs/blob/829d21890023800713e5dd231c67e43ecc06069b/README.md#license>) says:
+- Weights: **the license is unclear; they are presumed to be under CC BY-NC (non-commercial).** The Hugging Face model card has no license field, and the Demucs README ("License" section, <https://github.com/adefossez/demucs/blob/829d21890023800713e5dd231c67e43ecc06069b/README.md#license>) says:
 
   > Demucs code is released under the MIT license as found in the LICENSE file. The license of the weights is not clear: MusDB contains some data that were only usable for research purpose. I sadly cannot help granting a license, both coming from Meta custom data, or from the original MusDB data. The 6 source variant of htdemucs was trained only on Meta internal dataset, which likely means CC-NC-BY license is applicable, as it was the case for all models released by FAIR.
 
-  The converted model's metadata says `MIT (Demucs, Meta Platforms)`, which covers the code only.
+- Use: Woodshed release builds that bundle this model are distributed free of charge, for non-commercial use only; the model must not be used commercially. Woodshed's own source code stays under the MIT License.
+- Attribution: Meta Demucs, `htdemucs_6s` (<https://github.com/adefossez/demucs>, weights at <https://huggingface.co/adefossez/HTDemucs-6s>). The converted model's metadata records the same terms.
 
 ## Bundled programs
 

@@ -99,7 +99,7 @@ mise run stem-model   # = pnpm stem-model = sh tools/stem-model/build.sh
 # → src-tauri/models/htdemucs_6s_fp32.mlmodelc (115MB)
 ```
 
-- 가중치: Hugging Face [`adefossez/HTDemucs-6s`](https://huggingface.co/adefossez/HTDemucs-6s)의 고정 리비전 `3c5ee475be62`에서 `5c90dfd2.safetensors`를 받아 SHA-256(`d2a1745f…d411`)을 확인합니다. Demucs 코드는 MIT(Meta Platforms)이고, 가중치에는 라이선스가 부여되지 않았습니다([라이선스](#라이선스) 절).
+- 가중치: Hugging Face [`adefossez/HTDemucs-6s`](https://huggingface.co/adefossez/HTDemucs-6s)의 고정 리비전 `3c5ee475be62`에서 `5c90dfd2.safetensors`를 받아 SHA-256(`d2a1745f…d411`)을 확인합니다. Demucs 코드는 MIT(Meta Platforms)입니다. 가중치는 라이선스가 불명확해 CC BY-NC(비상업)로 보고, 이 모델을 넣은 릴리스 앱은 무료·비상업으로 배포합니다([라이선스](#라이선스) 절).
 - 변환: `tools/stem-model/`의 `core.py`(STFT/iSTFT를 뺀 핵심부)를 `convert.py`가 fp32 mlprogram으로 바꾸고 `xcrun coremlcompiler`로 컴파일합니다. Python은 mise로 고정한 uv 0.10.7이 만든 Python 3.12.8 가상환경에서 `requirements.lock.txt`(torch 2.7.0, coremltools 9.0, demucs 4.1.0 등 전부 고정)로 돌립니다. 처음 한 번은 가중치 52MB 다운로드, Python 패키지 설치, 변환(약 5초)을 합니다. 새 캐시에서 약 21초 걸린 기록이 있고, 네트워크와 uv 캐시 상태에 따라 다릅니다.
 - 결과와 가중치는 `~/Library/Caches/dev.mongmeo.woodshed/models`에 캐시되어 다음부터는 복사만 합니다. 스크립트·잠금 파일·가중치가 바뀌면 다시 변환합니다. 변환한 모델은 같은 입력이면 `model.mil`·가중치가 바이트 단위로 같습니다.
 - `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 모델이 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 디렉터리를 만들고, 모델이 필요한 테스트는 건너뛴 사실을 출력합니다. dev 앱은 캐시에 모델이 있으면 그것을 씁니다.
@@ -177,10 +177,10 @@ Woodshed의 소스 코드는 [MIT License](LICENSE)로 공개합니다. 앱은 �
 | npm 패키지(React, i18next 등)            | 웹뷰 번들              | MIT, Apache-2.0 OR MIT(GPL 없음)                                                          | [`LICENSES/npm-packages.md`](LICENSES/npm-packages.md)            |
 | FFmpeg 9.0.2                             | 별도 프로그램(sidecar) | LGPL-2.1-or-later, 오디오 전용 구성(`--disable-gpl --disable-nonfree --disable-version3`) | [빌드 구성·소스 위치](LICENSES/README.md#ffmpeg-902)              |
 | yt-dlp 2026.10.26 `yt-dlp_macos`         | 별도 프로그램(sidecar) | yt-dlp는 Unlicense, PyInstaller 번들 전체는 GPLv3+                                        | [소스 위치](LICENSES/README.md#yt-dlp-20261026-yt-dlp_macos)      |
-| Demucs `htdemucs_6s` 모델(Core ML 변환)  | 번들 리소스            | 코드 MIT, **가중치는 라이선스 부여 없음**                                                 | [근거](LICENSES/README.md#stem-separation-model-bundled-resource) |
+| Demucs `htdemucs_6s` 모델(Core ML 변환)  | 번들 리소스            | 코드 MIT, **가중치는 CC BY-NC 추정(비상업)**                                              | [근거](LICENSES/README.md#stem-separation-model-bundled-resource) |
 | 드럼 샘플(VCSL)                          | 번들 리소스            | CC0-1.0                                                                                   | [`LICENSES/drum-samples.md`](LICENSES/drum-samples.md)            |
 
-- Demucs 가중치: Hugging Face 모델 카드에 license 필드가 없고, Demucs README는 가중치의 라이선스가 불분명하며 6스템 변형은 Meta 내부 데이터로만 학습해 CC BY-NC가 적용될 가능성이 높다고 적습니다. 모델은 저장소에 넣지 않고 `mise run stem-model`이 원본에서 받아 만듭니다.
+- Demucs 가중치: 라이선스가 불명확합니다. Hugging Face 모델 카드에 license 필드가 없고, Demucs README([License 절, `829d2189`](https://github.com/adefossez/demucs/blob/829d21890023800713e5dd231c67e43ecc06069b/README.md#license))는 6스템 변형이 Meta 내부 데이터로만 학습되어 CC BY-NC가 적용될 가능성이 높다고 적습니다. 그래서 CC BY-NC로 보고, 이 모델을 넣은 릴리스 앱은 무료로, 비상업 용도로만 배포합니다. 출처: Meta Demucs(`htdemucs_6s`). Woodshed 소스 코드 자체는 MIT입니다. 모델은 저장소에 넣지 않고 `mise run stem-model`이 원본에서 받아 만듭니다.
 - yt-dlp와 FFmpeg는 앱이 자식 프로세스로 실행만 하고 링크하지 않습니다. 둘 다 원본을 고치지 않았고, 정확한 버전·체크섬·빌드 구성은 `scripts/fetch-binaries.sh`에 고정되어 있습니다.
 - [`DESIGN.md`](DESIGN.md)는 VoltAgent/awesome-design-md(MIT, Copyright (c) 2026 VoltAgent)에서 가져왔습니다([`LICENSES/awesome-design-md-MIT.txt`](LICENSES/awesome-design-md-MIT.txt)).
 - 의존성을 바꾸면 `mise exec -- python3 scripts/collect-licenses.py`로 Rust·npm 고지를 다시 만듭니다.
