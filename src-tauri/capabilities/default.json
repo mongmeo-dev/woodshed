@@ -3,5 +3,12 @@
   "identifier": "default",
   "description": "Main window permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "log:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "log:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart"
+  ]
 }

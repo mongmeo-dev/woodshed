@@ -49,6 +49,8 @@ pub fn run() {
     startup::begin();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -60,6 +62,7 @@ pub fn run() {
         })
         .setup(|app| {
             startup::mark("setup started");
+            log::info!("Woodshed {} started", app.package_info().version);
             let data_dir = app.path().app_data_dir()?;
             app.manage(SettingsStore::load(&data_dir));
             let audio = app_audio::AudioService::start(app.handle(), &app.state::<SettingsStore>());
