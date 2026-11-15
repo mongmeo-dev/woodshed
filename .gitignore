@@ -26,12 +26,33 @@ target/
 *.keychain-db
 notary.env
 
-# Editor, agent and tool caches
+# Editors
 .idea/
 .vscode/
+.cursor/
+
+# Coding agent and tool state (sessions, logs, handoffs)
 .worktrees/
 .omc/
+.omx/
+.omx-state-locks/
+.omo/
+.gjc/
+.orca/
+.orca-preparing/
+.opencode/
+.remember/
+.superpowers/
+.taste-skill/
 .impeccable/
+.playwright-cli/
 .claude/settings.local.json
 _workspace/
 qa/
+
+# Python caches
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
