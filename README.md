@@ -40,6 +40,25 @@ mise run signing-cert   # = sh scripts/create-local-signing-cert.sh
 - `mise run app`은 이 인증서가 있으면 그것으로 서명하고(hardened runtime 없이, `src-tauri/tauri.local-signing.conf.json`), 없으면 ad-hoc으로 빌드합니다. `mise run check`와 테스트는 인증서와 상관없습니다.
 - 지우기: `sh scripts/create-local-signing-cert.sh --remove`. 배포 빌드는 Developer ID로 따로 서명합니다.
 
+### 배포 빌드 (Developer ID 서명·공증)
+
+다른 Mac에서도 경고 없이 열리는 앱은 Developer ID로 서명하고 Apple 공증을 받습니다. App Store에는 올리지 않습니다.
+
+```sh
+# 한 번: Developer ID Application 인증서(.p12)를 전용 키체인에 넣기
+sh scripts/create-release-keychain.sh <identity.p12> <p12 암호 파일>
+# 한 번: 공증용 App Store Connect API 키
+#   ~/Library/Application Support/woodshed-release/notary.env (권한 600)
+#   APPLE_API_KEY=<키 ID>
+#   APPLE_API_ISSUER=<발급자 ID>
+#   APPLE_API_KEY_PATH=<AuthKey_<키 ID>.p8 경로>
+mise run app:release    # = sh scripts/build-release.sh
+```
+
+- 키체인은 `~/Library/Keychains/woodshed-release.keychain-db`, 암호는 `~/Library/Application Support/woodshed-release/`에 둡니다. 로그인 키체인은 이 세션 같은 비대화형 환경에서 서명할 수 없어(`errSecInternalComponent`) 쓰지 않습니다.
+- hardened runtime과 `src-tauri/Entitlements.plist`로 서명합니다. 마이크(`device.audio-input`)와, yt-dlp(PyInstaller)가 실행 중 푼 Python 라이브러리를 불러오도록 `cs.disable-library-validation`을 줍니다. Tauri는 이 파일을 sidecar 서명에도 씁니다.
+- 빌드 끝에 공증·staple을 하고 `codesign --verify --deep --strict`, `stapler validate`, `spctl`로 확인합니다. Developer ID 앱은 로컬 서명 앱과 다른 앱으로 보여 마이크 권한을 한 번 다시 묻습니다.
+
 ### 첫 실행과 마이크 권한
 
 마이크 권한이 아직 정해지지 않았고 기본 출력 장치에 입력이 있으면(오디오 인터페이스 등), macOS는 권한 창에 답할 때까지 출력 스트림을 만들지 않습니다. 앱은 이때 권한 창을 띄우고, 답하는 즉시 출력을 엽니다(`AGENTS.md`의 출력 관리자). 첫 실행 조건은 `tccutil reset Microphone dev.mongmeo.woodshed`로 다시 만들 수 있습니다.
