@@ -352,3 +352,9 @@ export function formatTime(seconds: number): string {
   const ss = String(s).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
+
+/** `m:ss.s` (or `h:mm:ss.s`): a song position to the nearest tenth of a second. */
+export function formatTimePrecise(seconds: number): string {
+  const tenths = Math.max(0, Math.round(seconds * 10));
+  return `${formatTime(Math.floor(tenths / 10))}.${tenths % 10}`;
+}

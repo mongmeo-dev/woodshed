@@ -15,6 +15,31 @@
   .stems .stems-layout {
     grid-template-columns: minmax(240px, 2fr) minmax(0, 3fr);
   }
+
+  /* With a song open: the player across both columns so the waveform is
+     wide, the library on the left and the mixer on the right. A single
+     column keeps the DOM order: player, mixer, library. */
+  .stems .stems-layout[data-open] {
+    grid-template-areas:
+      "stage stage"
+      "library mixer";
+  }
+
+  .stems .stems-layout[data-open] .stems-stage {
+    grid-area: stage;
+  }
+
+  .stems .stems-layout[data-open] .stems-library-column {
+    grid-area: library;
+  }
+
+  .stems .stems-layout[data-open] .stems-mixer-column {
+    grid-area: mixer;
+  }
+}
+
+.stems .stems-stage {
+  min-width: 0;
 }
 
 .stems .stems-column {
@@ -293,17 +318,109 @@
   padding-top: var(--ws-space-md);
 }
 
+/* The waveform column: the waveform, the time ruler under it, and the loop,
+   pointer line and loop edges laid over both. */
 .stems .waveform {
+  --waveform-height: 112px;
   position: relative;
-  height: 88px;
-  border-radius: var(--ws-radius-sm);
   touch-action: none;
+  user-select: none;
+}
+
+/* The cursor shows what a press grabs; while dragging, the drag decides. */
+.stems .waveform[data-zone="inside"] {
+  cursor: grab;
+}
+
+.stems .waveform[data-zone="start"],
+.stems .waveform[data-zone="end"],
+.stems .waveform[data-drag="resize"] {
+  cursor: ew-resize;
+}
+
+.stems .waveform[data-drag="move"] {
+  cursor: grabbing;
+}
+
+.stems .waveform[data-drag="select"] {
+  cursor: auto;
+}
+
+.stems .waveform-view {
+  position: relative;
+  height: var(--waveform-height);
+}
+
+.stems .waveform-track {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--ws-radius-sm);
 }
 
 .stems .waveform-canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.stems .waveform-ruler {
+  position: relative;
+  height: 22px;
+  color: var(--ws-color-text-tertiary);
+  font-size: var(--ws-type-fine-size);
+  letter-spacing: var(--ws-type-fine-tracking);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.stems .ruler-tick {
+  position: absolute;
+  top: var(--ws-space-xs);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.stems .ruler-tick[data-first] {
+  transform: none;
+}
+
+/* Under the pointer time or the dragged range. */
+.stems .ruler-tick[data-covered] {
+  visibility: hidden;
+}
+
+.stems .ruler-tick::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--ws-space-xs));
+  left: 50%;
+  width: 1px;
+  height: 4px;
+  background: var(--ws-color-hairline);
+}
+
+.stems .ruler-tick[data-first]::before {
+  left: 0;
+}
+
+.stems .ruler-time {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  padding: var(--ws-space-xxs);
+  border: 1px solid var(--ws-color-hairline);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-color-canvas);
+  color: var(--ws-color-text);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.stems .ruler-time[data-range] {
+  border-color: var(--ws-color-accent);
+  background: var(--ws-color-accent);
+  color: var(--ws-color-on-accent);
 }
 
 .stems .waveform-loop {
@@ -320,10 +437,63 @@
   opacity: 0.08;
 }
 
+.stems .waveform-hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ws-color-text-tertiary);
+  pointer-events: none;
+}
+
+/* A loop edge on the waveform: a thin line with a grip, stopping above the
+   ruler so its labels stay clear. Presses are judged by position on the
+   waveform (timeline.ts loopZoneAt), so the edge itself takes no pointer. */
+.stems .loop-handle {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: var(--waveform-height);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.stems .loop-handle:focus-visible {
+  outline: none;
+}
+
+.stems .loop-handle:focus-visible::after {
+  outline: var(--ws-focus-width) solid var(--ws-color-accent-focus);
+  outline-offset: var(--ws-focus-width);
+}
+
+.stems .loop-handle::before,
+.stems .loop-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  background: var(--ws-color-accent);
+  transform: translateX(-50%);
+}
+
+.stems .loop-handle::before {
+  top: 0;
+  width: 2px;
+  height: var(--waveform-height);
+}
+
+.stems .loop-handle::after {
+  top: calc(var(--waveform-height) / 2 - 12px);
+  width: 8px;
+  height: 24px;
+  border-radius: var(--ws-radius-sm);
+}
+
 .stems .player-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--ws-space-sm);
+  gap: var(--ws-space-xs) var(--ws-space-sm);
   min-height: 52px;
   padding: var(--ws-space-xs) 0;
 }
@@ -353,7 +523,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--ws-space-xxs);
-  margin-left: auto;
   padding: 0 var(--ws-space-xxs) 0 var(--ws-space-sm);
   min-height: 28px;
   border-radius: var(--ws-radius-sm);
@@ -363,11 +532,26 @@
   font-variant-numeric: tabular-nums;
 }
 
-.stems .speed-row .range {
-  max-width: 280px;
+.stems .player-speed {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-sm);
+  margin-left: auto;
+  font-size: var(--ws-type-caption-size);
 }
 
-.stems .speed-value,
+.stems .player-speed .range {
+  flex: none;
+  width: 160px;
+}
+
+.stems .player-speed-value {
+  min-width: 44px;
+  color: var(--ws-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .stems .fader-value {
   min-width: 44px;
   text-align: right;
