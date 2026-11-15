@@ -1,1 +1,9 @@
 __pycache__/
+.venv/
+# Weights, converted models and comparison output stay in the cache or /tmp.
+*.safetensors
+*.th
+*.mlpackage/
+*.mlmodelc/
+*.npy
+*.wav
