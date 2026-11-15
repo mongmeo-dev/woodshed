@@ -20,7 +20,14 @@ if woodshed_signing_ready; then
   ln -s /usr/bin/xattr "$tools/xattr"
   echo "signing with \"$WOODSHED_SIGNING_NAME\""
   PATH="$tools:$PATH" pnpm tauri build --config src-tauri/tauri.local-signing.conf.json "$@"
-  exit
+else
+  echo "no local signing identity: ad-hoc signed build (see scripts/create-local-signing-cert.sh)"
+  pnpm tauri build "$@"
 fi
-echo "no local signing identity: ad-hoc signed build (see scripts/create-local-signing-cert.sh)"
-exec pnpm tauri build "$@"
+# A --config that swaps in the update test frontend (installs updates without
+# a click) must not leave an app here; that build is scripts/build-update-test.sh.
+if ! node scripts/check-release-dist.mjs; then
+  rm -rf src-tauri/target/release/bundle/macos/Woodshed.app
+  echo "error: refused an update test frontend; removed the app" >&2
+  exit 1
+fi

@@ -29,6 +29,12 @@ ln -s /usr/bin/xattr "$tools/xattr"
 echo "signing with Developer ID $identity, then notarizing"
 PATH="$tools:$PATH" pnpm tauri build --config src-tauri/tauri.release.conf.json "$@"
 app=src-tauri/target/release/bundle/macos/Woodshed.app
+# Never ship the update test frontend (installs updates without a click).
+if ! node scripts/check-release-dist.mjs; then
+  rm -rf "$app"
+  echo "error: refused an update test frontend; removed the app" >&2
+  exit 1
+fi
 codesign --verify --deep --strict "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute "$app"

@@ -15,11 +15,15 @@ export interface AvailableUpdate {
 }
 
 /**
- * Test builds only (`VITE_UPDATE_AUTO_INSTALL=1` at build time): installs a
- * found update without a click. Release builds leave it unset, and the bundler
- * drops the branch.
+ * Vite mode of the local update test build only (`scripts/build-update-test.sh`
+ * runs `vite build --mode update-test`). No environment variable or `.env`
+ * file turns it on: every other build runs in `production` (or `development`,
+ * `test`), where this is a constant false and the bundler drops the branch.
  */
-export const AUTO_INSTALL = import.meta.env.VITE_UPDATE_AUTO_INSTALL === "1";
+export const UPDATE_TEST_MODE = "update-test";
+
+/** Installs a found update without a click. Update test builds only. */
+export const AUTO_INSTALL = import.meta.env.MODE === UPDATE_TEST_MODE;
 
 /** Updates work only inside the Tauri app. */
 export function updatesSupported(): boolean {

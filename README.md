@@ -78,18 +78,19 @@ sh scripts/create-updater-key.sh   # 한 번. 이미 있으면 다시 만들지 
 
 #### 로컬 서버로 업데이트 확인
 
-출시 설정을 바꾸지 않고 테스트 전용 `--config`로 확인합니다.
+테스트 빌드는 `scripts/build-update-test.sh`로만 만듭니다. 이 스크립트는 임시 `--config`로 엔드포인트를 `http://127.0.0.1:<포트>/latest.json`(http 허용)으로 바꾸고, 프런트엔드를 Vite mode `update-test`로 빌드합니다. 이 모드에서만 찾은 업데이트를 클릭 없이 바로 설치합니다. 환경 변수나 `.env`로는 켤 수 없습니다.
 
-1. 테스트 설정 JSON: `plugins.updater.endpoints`를 `["http://127.0.0.1:<포트>/latest.json"]`, `plugins.updater.dangerousInsecureTransportProtocol`을 `true`로 둡니다. 이전 버전 후보에는 `{"version": "0.0.9"}`처럼 낮은 버전을, 새 버전에는 `{"bundle": {"createUpdaterArtifacts": true}}`를 더 줍니다.
-2. `VITE_UPDATE_AUTO_INSTALL=1`로 빌드하면 화면 클릭 없이 찾은 업데이트를 바로 설치합니다(테스트 전용, 기본 빌드에서는 번들러가 이 분기를 지웁니다).
+```sh
+sh scripts/build-update-test.sh 0.0.9 18765 <임시 폴더>/old                       # 이전 버전 후보
+sh scripts/build-update-test.sh 0.1.0 18765 <임시 폴더>/new --updater-artifacts   # 새 버전과 서명된 업데이트 파일
+```
 
-   ```sh
-   VITE_UPDATE_AUTO_INSTALL=1 sh scripts/build-app.sh --config test.json --config old.json   # 후보를 임시 폴더로 복사
-   TAURI_SIGNING_PRIVATE_KEY="$(cat …/updater.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat …/updater-key-password)" \
-     VITE_UPDATE_AUTO_INSTALL=1 sh scripts/build-app.sh --config test.json --config new.json
-   ```
-3. `Woodshed.app.tar.gz`와 `.sig` 내용으로 `latest.json`(`platforms.darwin-aarch64.{signature,url}`)을 만들어 `python3 -m http.server`로 내려주고, 후보를 `open -g -n`으로 엽니다. 업데이트되면 `~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`에 `Woodshed 0.0.9 started` 다음 `Woodshed 0.1.0 started`가 남습니다.
-4. 후보는 운영 앱과 같은 앱 데이터 폴더를 쓰므로 실행 전에 백업하고 끝나면 되돌립니다. 빌드가 남긴 `target/release/bundle`의 테스트 설정 앱은 지웁니다.
+1. `new/Woodshed.app.tar.gz`와 `.sig` 내용으로 `latest.json`(`version`, `platforms.darwin-aarch64.{signature,url}`)을 만들어 `python3 -m http.server 18765 --bind 127.0.0.1`로 내려줍니다.
+2. `open -g -n old/Woodshed.app`으로 후보를 엽니다. 업데이트되면 `~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`에 `Woodshed 0.0.9 started` 다음 `Woodshed 0.1.0 started`가 남습니다.
+3. 후보는 운영 앱과 같은 앱 데이터 폴더를 쓰므로 실행 전에 백업하고 끝나면 되돌립니다.
+
+- 스크립트는 앱과 업데이트 파일을 지정한 폴더로 옮기고 `dist/`를 지워, `target/`에 테스트 빌드를 남기지 않습니다.
+- `pnpm build`, `mise run app`, `mise run app:release`는 빌드한 `dist/`를 `scripts/check-release-dist.mjs`로 검사합니다. 자동 설치 코드가 들어 있으면 실패하고, 앱 빌드는 만든 앱을 지웁니다.
 
 ### 첫 실행과 마이크 권한
 

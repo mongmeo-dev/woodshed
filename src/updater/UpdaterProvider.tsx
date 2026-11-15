@@ -90,7 +90,11 @@ export function UpdaterProvider({
       } finally {
         busy.current = false;
       }
-      if (found && AUTO_INSTALL) await install();
+      if (found && AUTO_INSTALL) {
+        // Marker for scripts/check-release-dist.mjs: never in a release bundle.
+        console.info("woodshed-update-test: installing without a click");
+        await install();
+      }
     },
     [install],
   );
