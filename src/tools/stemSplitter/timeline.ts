@@ -28,13 +28,12 @@ export type LoopZone = "start" | "end" | "inside";
 /**
  * Edges reach EDGE_REACH_PX outside the loop, and inside it by a quarter of
  * the loop's width at most, so a narrow loop keeps a middle that moves it.
- * Where both edges reach, the nearer one wins.
+ * The two reaches never overlap (each takes at most a quarter inside).
  */
 export function loopZoneAt(x: number, startX: number, endX: number): LoopZone | null {
   const inner = Math.min(EDGE_REACH_PX, (endX - startX) / 4);
   const nearStart = x >= startX - EDGE_REACH_PX && x <= startX + inner;
   const nearEnd = x >= endX - inner && x <= endX + EDGE_REACH_PX;
-  if (nearStart && nearEnd) return Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end";
   if (nearStart) return "start";
   if (nearEnd) return "end";
   return x > startX && x < endX ? "inside" : null;

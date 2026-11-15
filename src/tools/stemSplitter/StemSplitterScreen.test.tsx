@@ -712,6 +712,44 @@ test("changing the loop while playing past its new end jumps to the loop start",
   expect(called("stems_seek").slice(seeks)).toEqual([{ seconds: 18 }]);
 });
 
+test("a loop changed while paused past its new end moves the playhead to its start", async () => {
+  await renderWithLoop();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  fireEvent.pointerDown(position, { button: 0, clientX: 278, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 278, pointerId: 1 });
+  await waitFor(() => expect(backend.applied.position).toBeCloseTo(50.04, 1));
+  const seeks = called("stems_seek").length;
+  dragOn(position, 300, 250);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 45 }));
+  await waitFor(() => expect(called("stems_seek").slice(seeks)).toEqual([{ seconds: 18 }]));
+});
+
+test("a playhead left past the loop on purpose stays where it is when the loop changes", async () => {
+  await renderWithLoop();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  // 1:48, after the 0:18–0:54 loop.
+  fireEvent.pointerDown(position, { button: 0, clientX: 600, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 600, pointerId: 1 });
+  await waitFor(() => expect(backend.applied.position).toBeCloseTo(108, 1));
+  const seeks = called("stems_seek").length;
+  dragOn(position, 100, 60);
+  await waitFor(() => expect(lastLoop()?.start).toBeCloseTo(10.8));
+  await settle();
+  expect(called("stems_seek")).toHaveLength(seeks);
+});
+
+test("an edge at the very start of the song can be grabbed from just outside the waveform", async () => {
+  mockWaveformWidth();
+  await renderOpened();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  dragOn(position, 0, 11.1);
+  await waitFor(() => expect(lastLoop()?.start).toBe(0));
+  // 6 px left of the waveform (its press area reaches past it), dragged right.
+  dragOn(position, -6, 5);
+  await waitFor(() => expect(lastLoop()?.start).toBeCloseTo(0.9, 5));
+  expect(lastLoop()?.end).toBeCloseTo(1.998, 5);
+});
+
 test("opening another song clears the pointer line of the last one", async () => {
   backend.secondSong = true;
   mockWaveformWidth();
