@@ -223,7 +223,7 @@ export function StemSplitterScreen() {
         </h1>
       </header>
       <div className="screen-body stems">
-        <div className="stems-layout">
+        <div className="stems-layout" data-open={opened || player.openError ? true : undefined}>
           {(opened || player.openError) && (
             <div className="stems-stage">
               {player.openError && (
@@ -314,31 +314,8 @@ export function StemSplitterScreen() {
             </div>
           )}
 
-          <div className="stems-column">
-            <ImportBar
-              importing={library.importing}
-              error={library.error}
-              dragging={dragging}
-              onOpenFile={() => void openFile()}
-              onLink={addLink}
-              onCancel={library.cancel}
-              onEdit={library.clearError}
-            />
-            <section aria-labelledby="stems-songs">
-              <h2 className="stems-section-title" id="stems-songs">
-                {t("stems.library.title")}
-              </h2>
-              <SongList
-                songs={library.songs}
-                openId={openId}
-                onOpen={(id) => void open(id)}
-                onDelete={(id) => void removeSong(id)}
-              />
-            </section>
-          </div>
-
           {opened && (
-            <div className="stems-column">
+            <div className="stems-column stems-mixer-column">
               <section aria-labelledby="stems-mixer">
                 <div className="stems-section-header">
                   <h2 className="stems-section-title" id="stems-mixer">
@@ -364,6 +341,29 @@ export function StemSplitterScreen() {
               </section>
             </div>
           )}
+
+          <div className="stems-column stems-library-column">
+            <ImportBar
+              importing={library.importing}
+              error={library.error}
+              dragging={dragging}
+              onOpenFile={() => void openFile()}
+              onLink={addLink}
+              onCancel={library.cancel}
+              onEdit={library.clearError}
+            />
+            <section aria-labelledby="stems-songs">
+              <h2 className="stems-section-title" id="stems-songs">
+                {t("stems.library.title")}
+              </h2>
+              <SongList
+                songs={library.songs}
+                openId={openId}
+                onOpen={(id) => void open(id)}
+                onDelete={(id) => void removeSong(id)}
+              />
+            </section>
+          </div>
         </div>
       </div>
     </section>

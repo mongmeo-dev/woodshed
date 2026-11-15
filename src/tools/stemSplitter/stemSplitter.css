@@ -16,9 +16,25 @@
     grid-template-columns: minmax(240px, 2fr) minmax(0, 3fr);
   }
 
-  /* The open song's player spans both columns so the waveform is wide. */
-  .stems .stems-stage {
-    grid-column: 1 / -1;
+  /* With a song open: the player across both columns so the waveform is
+     wide, the library on the left and the mixer on the right. A single
+     column keeps the DOM order: player, mixer, library. */
+  .stems .stems-layout[data-open] {
+    grid-template-areas:
+      "stage stage"
+      "library mixer";
+  }
+
+  .stems .stems-layout[data-open] .stems-stage {
+    grid-area: stage;
+  }
+
+  .stems .stems-layout[data-open] .stems-library-column {
+    grid-area: library;
+  }
+
+  .stems .stems-layout[data-open] .stems-mixer-column {
+    grid-area: mixer;
   }
 }
 
