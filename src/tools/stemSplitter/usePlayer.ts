@@ -19,6 +19,7 @@ import {
   setTrack,
   type Transport,
 } from "../../lib/stems";
+import { loopable } from "./timeline";
 
 export interface TrackMix {
   volume: number;
@@ -31,8 +32,6 @@ const POLL_PLAYING_MS = 200;
 const POLL_PAUSED_MS = 1000;
 /** Re-reads the transport this long after a command, once it has likely applied. */
 const SETTLE_MS = 40;
-/** Shortest loop the waveform selection makes. */
-export const MIN_LOOP_SECS = 0.1;
 
 /** Last transport sample and the performance time its position is heard. */
 export interface TransportSample {
@@ -286,7 +285,7 @@ export function usePlayer() {
 
   const changeLoop = useCallback(
     (range: LoopRange | null) => {
-      const valid = range && range.end - range.start >= MIN_LOOP_SECS ? range : null;
+      const valid = range && loopable(range) ? range : null;
       intent.current.loop = valid;
       setLoopState(valid);
       return sendTransport(() => sendLoop(valid));
