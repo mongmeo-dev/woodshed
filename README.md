@@ -59,6 +59,22 @@ mise run app:release    # = sh scripts/build-release.sh
 - hardened runtime과 `src-tauri/Entitlements.plist`로 서명합니다. 마이크(`device.audio-input`)와, yt-dlp(PyInstaller)가 실행 중 푼 Python 라이브러리를 불러오도록 `cs.disable-library-validation`을 줍니다. Tauri는 이 파일을 sidecar 서명에도 씁니다.
 - 빌드 끝에 공증·staple을 하고 `codesign --verify --deep --strict`, `stapler validate`, `spctl`로 확인합니다. Developer ID 앱은 로컬 서명 앱과 다른 앱으로 보여 마이크 권한을 한 번 다시 묻습니다.
 
+### 업데이트 서명 키
+
+앱은 GitHub 릴리스의 `latest.json`(`https://github.com/mongmeo-dev/woodshed/releases/latest/download/latest.json`)으로 새 버전을 확인하고, 업데이트 파일의 서명을 `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`로 검증합니다.
+
+```sh
+sh scripts/create-updater-key.sh   # 한 번. 이미 있으면 다시 만들지 않고 공개키만 출력
+```
+
+- 키는 `~/Library/Application Support/woodshed-release/`에 있습니다(모두 권한 600).
+  - `updater.key`: 서명 개인키(암호로 잠김)
+  - `updater.key.pub`: 공개키(`plugins.updater.pubkey`와 같은 값)
+  - `updater-key-password`: 개인키 암호
+- **세 파일을 함께 백업하세요**(암호 관리자나 암호화한 외장 저장소 등, 저장소 밖). 개인키나 암호를 잃으면 새 업데이트에 서명할 수 없고, 이미 설치된 앱은 더 이상 업데이트되지 않습니다. 키를 새로 만들면 사용자가 새 버전을 직접 받아 설치해야 합니다.
+- 릴리스 빌드는 `TAURI_SIGNING_PRIVATE_KEY`(키 파일 경로나 내용)와 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`로 이 키를 넘깁니다. 경로 변수는 `scripts/release-signing.sh`의 `WOODSHED_UPDATER_KEY`, `WOODSHED_UPDATER_KEY_PASSWORD_FILE`입니다.
+- 업데이트 파일(`bundle.createUpdaterArtifacts`)은 빌드할 때 개인키가 있어야 하므로 기본 설정에 넣지 않습니다. `mise run app`은 키 없이 빌드됩니다.
+
 ### 첫 실행과 마이크 권한
 
 마이크 권한이 아직 정해지지 않았고 기본 출력 장치에 입력이 있으면(오디오 인터페이스 등), macOS는 권한 창에 답할 때까지 출력 스트림을 만들지 않습니다. 앱은 이때 권한 창을 띄우고, 답하는 즉시 출력을 엽니다(`AGENTS.md`의 출력 관리자). 첫 실행 조건은 `tccutil reset Microphone dev.mongmeo.woodshed`로 다시 만들 수 있습니다.
