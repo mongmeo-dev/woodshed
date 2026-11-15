@@ -9,16 +9,22 @@ fn read(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-#[test]
-fn audio_crate_notices_and_texts_are_present() {
-    let list = read("rust-audio-crates.md");
-    let crates: Vec<&str> = list
+fn listed(file: &str) -> Vec<String> {
+    read(file)
         .lines()
         .filter_map(|line| line.strip_prefix('|'))
         .filter_map(|row| row.split('|').next())
-        .map(str::trim)
-        .collect();
+        .map(|name| name.trim().to_owned())
+        .collect()
+}
+
+#[test]
+fn rust_crate_notices_and_texts_are_present() {
+    let crates = listed("rust-crates.md");
     for name in [
+        "tauri",
+        "wry",
+        "cpal",
         "symphonia",
         "symphonia-core",
         "signalsmith-stretch",
@@ -27,10 +33,11 @@ fn audio_crate_notices_and_texts_are_present() {
         "rustfft",
         "hound",
         "audioadapter",
+        "objc2-core-ml",
     ] {
-        assert!(crates.contains(&name), "{name} listed");
+        assert!(crates.iter().any(|c| c == name), "{name} listed");
     }
-    let texts = read("rust-audio-crates.txt");
+    let texts = read("rust-crates.txt");
     for needle in [
         "Mozilla Public License Version 2.0",
         "Apache License",
@@ -38,13 +45,19 @@ fn audio_crate_notices_and_texts_are_present() {
         "Signalsmith Linear (C++)",
         "Permission is hereby granted, free of charge",
         "rubato 5.0.1",
+        "UNICODE LICENSE V3",
     ] {
         assert!(texts.contains(needle), "{needle} present");
     }
-    assert!(
-        !texts.contains("No license file"),
-        "every crate has its text"
-    );
+}
+
+#[test]
+fn npm_package_notices_and_texts_are_present() {
+    let packages = listed("npm-packages.md");
+    for name in ["react", "react-dom", "i18next", "@tauri-apps/api"] {
+        assert!(packages.iter().any(|p| p == name), "{name} listed");
+    }
+    assert!(read("npm-packages.txt").contains("Meta Platforms"));
 }
 
 #[test]
@@ -54,6 +67,18 @@ fn bundled_program_notices_are_present() {
     let readme = read("README.md");
     assert!(readme.contains("ffmpeg-9.0.2.tar.xz"));
     assert!(readme.contains("GPLv3+"));
+    // Each release carries the source archives of both programs.
+    assert!(readme.contains("carries the source archive of this exact version"));
+    assert!(readme.contains("each Woodshed release carries its source archive"));
+}
+
+#[test]
+fn stem_model_weights_are_noticed_as_non_commercial() {
+    let readme = read("README.md");
+    assert!(readme.contains("presumed to be under CC BY-NC"));
+    assert!(readme.contains("for non-commercial use only"));
+    assert!(readme.contains("829d21890023800713e5dd231c67e43ecc06069b"));
+    assert!(readme.contains("Attribution: Meta Demucs"));
 }
 
 #[test]

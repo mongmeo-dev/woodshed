@@ -1,7 +1,58 @@
+# OS
 .DS_Store
+._*
+Thumbs.db
+
+# Dependencies and build output
 node_modules/
 dist/
 target/
-.worktrees/
 *.log
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+notary.env
+
+# Editors
+.idea/
+.vscode/
+.cursor/
+
+# Coding agent and tool state (sessions, logs, handoffs)
+.worktrees/
 .omc/
+.omx/
+.omx-state-locks/
+.omo/
+.gjc/
+.orca/
+.orca-preparing/
+.opencode/
+.remember/
+.superpowers/
+.taste-skill/
+.impeccable/
+.playwright-cli/
+.claude/settings.local.json
+_workspace/
+qa/
+
+# Python caches
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
