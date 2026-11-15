@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, expect, test, vi } from "vitest";
 import { i18n } from "../i18n";
 import { UpdateButton } from "./UpdateButton";
-import { UpdaterProvider } from "./UpdaterProvider";
+import { UpdaterProvider, useUpdater } from "./UpdaterProvider";
 import { UpdateSection } from "./UpdateSection";
 
 // The plugins, as the Tauri app answers them.
@@ -44,9 +44,34 @@ function controlledDownload() {
   };
 }
 
+/** The provider's actions, for calling them back to back. */
+let api: ReturnType<typeof useUpdater>;
+function Probe() {
+  api = useUpdater();
+  return null;
+}
+
+/** A check that stays open until the test answers it. */
+function pendingCheck() {
+  let answer: (value: unknown) => void = () => {};
+  let fail: (error: Error) => void = () => {};
+  check.mockImplementationOnce(
+    () =>
+      new Promise((resolve, reject) => {
+        answer = resolve;
+        fail = reject;
+      }),
+  );
+  return {
+    answer: (value: unknown) => act(async () => answer(value)),
+    fail: (error: Error) => act(async () => fail(error)),
+  };
+}
+
 function renderUpdater(startupDelayMs = 0) {
   render(
     <UpdaterProvider startupDelayMs={startupDelayMs}>
+      <Probe />
       <aside aria-label="sidebar">
         <UpdateButton />
       </aside>
@@ -164,6 +189,75 @@ test("a failed install (download or signature) shows the error and offers Instal
   controlledDownload();
   fireEvent.click(screen.getAllByRole("button", { name: "Install Update" })[0] as HTMLElement);
   expect(downloadAndInstall).toHaveBeenCalledTimes(2);
+});
+
+test("Install Update from the sidebar and settings at once downloads once", async () => {
+  check.mockResolvedValue(newVersion("0.2.0"));
+  const download = controlledDownload();
+  const { sidebar } = renderUpdater();
+  await sidebar.findByRole("button", { name: "Install Update" });
+  await act(async () => {
+    void api.install();
+    void api.install();
+  });
+  expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+  await download.finish();
+  expect(relaunch).toHaveBeenCalledTimes(1);
+});
+
+test("repeated Check for Updates while checking asks once", async () => {
+  check.mockResolvedValueOnce(null);
+  const { status } = renderUpdater();
+  await waitFor(() => expect(status()).toBe("Up to Date"));
+  const pending = pendingCheck();
+  await act(async () => {
+    void api.check();
+    void api.check();
+    void api.check();
+  });
+  expect(status()).toBe("Checking");
+  await pending.answer(null);
+  expect(check).toHaveBeenCalledTimes(2);
+  expect(status()).toBe("Up to Date");
+});
+
+test("the launch timer firing during a manual check does not check again", async () => {
+  const pending = pendingCheck();
+  const { status } = renderUpdater(100);
+  fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+  expect(status()).toBe("Checking");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+  expect(check).toHaveBeenCalledTimes(1);
+  await pending.answer(newVersion("0.2.0"));
+  expect(status()).toBe("Version 0.2.0 Available");
+  expect(check).toHaveBeenCalledTimes(1);
+});
+
+test("Check for Updates during the launch check joins it and shows its failure", async () => {
+  const pending = pendingCheck();
+  const { status } = renderUpdater();
+  await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
+  expect(status()).toBe("–");
+  fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+  expect(status()).toBe("Checking");
+  await pending.fail(new Error("offline"));
+  expect(check).toHaveBeenCalledTimes(1);
+  expect((await screen.findByRole("alert")).textContent).toBe("Couldn't check for updates");
+});
+
+test("checking or installing again during a download does nothing", async () => {
+  check.mockResolvedValue(newVersion("0.2.0"));
+  const download = controlledDownload();
+  const { sidebar, status } = renderUpdater();
+  fireEvent.click(await sidebar.findByRole("button", { name: "Install Update" }));
+  await act(async () => {
+    void api.check();
+    void api.install();
+  });
+  expect(check).toHaveBeenCalledTimes(1);
+  expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+  expect(status()).toBe("Downloading");
+  await download.finish();
 });
 
 test("Korean labels", async () => {
