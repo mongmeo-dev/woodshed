@@ -246,7 +246,11 @@ export function StemSplitterScreen() {
                       positionNow={positionNow}
                       onSeek={(seconds) => void player.seekTo(seconds)}
                       onLoop={(range) => void player.changeLoop(range)}
-                      labels={{ position: t("stems.player.position") }}
+                      labels={{
+                        position: t("stems.player.position"),
+                        loopStart: t("stems.player.loopStart"),
+                        loopEnd: t("stems.player.loopEnd"),
+                      }}
                       timeText={formatTime}
                       preciseTimeText={formatTimePrecise}
                       rangeText={rangeText}

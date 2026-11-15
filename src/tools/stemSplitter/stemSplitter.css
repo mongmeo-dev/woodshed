@@ -302,13 +302,30 @@
   padding-top: var(--ws-space-md);
 }
 
-/* The waveform column: the waveform, the time ruler under it, and the loop
-   and pointer line laid over both. */
+/* The waveform column: the waveform, the time ruler under it, and the loop,
+   pointer line and loop edges laid over both. */
 .stems .waveform {
   --waveform-height: 112px;
   position: relative;
   touch-action: none;
   user-select: none;
+}
+
+.stems .waveform[data-over-loop] {
+  cursor: grab;
+}
+
+.stems .waveform[data-drag="move"] {
+  cursor: grabbing;
+}
+
+.stems .waveform[data-drag="resize"] {
+  cursor: ew-resize;
+}
+
+/* While dragging, the drag's cursor wins over what is under the pointer. */
+.stems .waveform[data-drag] * {
+  cursor: inherit;
 }
 
 .stems .waveform-view {
@@ -409,6 +426,48 @@
   width: 1px;
   background: var(--ws-color-text-tertiary);
   pointer-events: none;
+}
+
+/* A loop edge on the waveform: a wide target around a thin line with a grip.
+   It stops above the ruler so the ruler labels stay clear. */
+.stems .loop-handle {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: var(--waveform-height);
+  margin-left: -8px;
+  cursor: ew-resize;
+}
+
+.stems .loop-handle:focus-visible {
+  outline: none;
+}
+
+.stems .loop-handle:focus-visible::after {
+  outline: var(--ws-focus-width) solid var(--ws-color-accent-focus);
+  outline-offset: var(--ws-focus-width);
+}
+
+.stems .loop-handle::before,
+.stems .loop-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  background: var(--ws-color-accent);
+  transform: translateX(-50%);
+}
+
+.stems .loop-handle::before {
+  top: 0;
+  width: 2px;
+  height: var(--waveform-height);
+}
+
+.stems .loop-handle::after {
+  top: calc(var(--waveform-height) / 2 - 12px);
+  width: 8px;
+  height: 24px;
+  border-radius: var(--ws-radius-sm);
 }
 
 .stems .player-controls {
