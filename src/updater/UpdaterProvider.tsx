@@ -53,13 +53,17 @@ export function UpdaterProvider({
   const [status, setStatus] = useState<UpdateStatus>({ kind: "idle" });
   const [version, setVersion] = useState<string | null>(null);
   const update = useRef<AvailableUpdate | null>(null);
-  const busy = useRef(false);
+  // One check or one install at a time: the sidebar and the settings card
+  // share these, and the launch timer can fire during a manual check.
+  const busy = useRef<"checking" | "installing" | null>(null);
+  // The running check shows its result and failure (a manual check asked).
+  const shown = useRef(false);
   const mounted = useRef(true);
 
   const install = useCallback(async () => {
     const found = update.current;
     if (!found || busy.current) return;
-    busy.current = true;
+    busy.current = "installing";
     setStatus({ kind: "downloading", version: found.version, progress: null });
     try {
       await found.install((progress) => {
@@ -68,16 +72,21 @@ export function UpdaterProvider({
     } catch {
       if (mounted.current) setStatus({ kind: "installFailed", version: found.version });
     } finally {
-      busy.current = false;
+      busy.current = null;
     }
   }, []);
 
   const runCheck = useCallback(
     async (quiet: boolean) => {
-      if (busy.current) return;
-      busy.current = true;
+      if (busy.current === "installing") return;
+      if (!quiet) {
+        shown.current = true;
+        setStatus({ kind: "checking" });
+      }
+      // A check already running answers this request too.
+      if (busy.current === "checking") return;
+      busy.current = "checking";
       let found: AvailableUpdate | null = null;
-      setStatus((previous) => (quiet ? previous : { kind: "checking" }));
       try {
         found = await checkForUpdate();
         update.current = found;
@@ -86,9 +95,10 @@ export function UpdaterProvider({
         }
       } catch {
         // A launch check fails quietly (offline and the like).
-        if (mounted.current && !quiet) setStatus({ kind: "checkFailed" });
+        if (mounted.current && shown.current) setStatus({ kind: "checkFailed" });
       } finally {
-        busy.current = false;
+        busy.current = null;
+        shown.current = false;
       }
       if (found && AUTO_INSTALL) {
         // Marker for scripts/check-release-dist.mjs: never in a release bundle.
