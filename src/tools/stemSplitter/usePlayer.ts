@@ -32,6 +32,8 @@ const POLL_PLAYING_MS = 200;
 const POLL_PAUSED_MS = 1000;
 /** Re-reads the transport this long after a command, once it has likely applied. */
 const SETTLE_MS = 40;
+/** A loop change reaches the engine about this much later (10 ms event lead, IPC, the command queue). */
+const LOOP_APPLY_MARGIN_MS = 100;
 
 /** Last transport sample and the performance time its position is heard. */
 export interface TransportSample {
@@ -286,12 +288,18 @@ export function usePlayer() {
   const changeLoop = useCallback(
     (range: LoopRange | null) => {
       const valid = range && loopable(range) ? range : null;
+      const previous = intent.current.loop;
+      // Where playback is when the change applies, under the loop it has now
+      // (the new loop would wrap a position just past its end back inside).
+      const margin = intent.current.playing ? LOOP_APPLY_MARGIN_MS : 0;
+      const position = positionNow(performance.now() + margin);
       intent.current.loop = valid;
       setLoopState(valid);
       const sent = sendTransport(() => sendLoop(valid));
-      // The player loops only once playback reaches the loop's end from
-      // before it. Playing past the new end would never loop, so jump in.
-      if (valid && intent.current.playing && positionNow() >= valid.end) {
+      // The player loops back only from inside or before the loop. A change
+      // that leaves the playhead past the new end jumps to its start, playing
+      // or paused, unless the playhead was already past the old loop on purpose.
+      if (valid && position >= valid.end && (previous === null || position < previous.end)) {
         return seekTo(valid.start);
       }
       return sent;
