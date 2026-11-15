@@ -31,6 +31,10 @@ run = "sh scripts/fetch-binaries.sh"
 description = "Build Woodshed.app (signed with the local signing identity when it exists)"
 run = "sh scripts/build-app.sh"
 
+[tasks."app:release"]
+description = "Build Woodshed.app signed with Developer ID, notarized and stapled"
+run = "sh scripts/build-release.sh"
+
 [tasks.signing-cert]
 description = "Create the local code-signing identity that keeps macOS permissions across rebuilds"
 run = "sh scripts/create-local-signing-cert.sh"
