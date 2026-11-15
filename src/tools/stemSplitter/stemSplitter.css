@@ -15,6 +15,15 @@
   .stems .stems-layout {
     grid-template-columns: minmax(240px, 2fr) minmax(0, 3fr);
   }
+
+  /* The open song's player spans both columns so the waveform is wide. */
+  .stems .stems-stage {
+    grid-column: 1 / -1;
+  }
+}
+
+.stems .stems-stage {
+  min-width: 0;
 }
 
 .stems .stems-column {
@@ -295,7 +304,7 @@
 
 .stems .waveform {
   position: relative;
-  height: 88px;
+  height: 112px;
   border-radius: var(--ws-radius-sm);
   touch-action: none;
 }
@@ -322,8 +331,9 @@
 
 .stems .player-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--ws-space-sm);
+  gap: var(--ws-space-xs) var(--ws-space-sm);
   min-height: 52px;
   padding: var(--ws-space-xs) 0;
 }
@@ -353,7 +363,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--ws-space-xxs);
-  margin-left: auto;
   padding: 0 var(--ws-space-xxs) 0 var(--ws-space-sm);
   min-height: 28px;
   border-radius: var(--ws-radius-sm);
@@ -363,11 +372,26 @@
   font-variant-numeric: tabular-nums;
 }
 
-.stems .speed-row .range {
-  max-width: 280px;
+.stems .player-speed {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-sm);
+  margin-left: auto;
+  font-size: var(--ws-type-caption-size);
 }
 
-.stems .speed-value,
+.stems .player-speed .range {
+  flex: none;
+  width: 160px;
+}
+
+.stems .player-speed-value {
+  min-width: 44px;
+  color: var(--ws-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .stems .fader-value {
   min-width: 44px;
   text-align: right;
