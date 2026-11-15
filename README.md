@@ -88,7 +88,7 @@ mise run binaries   # = pnpm binaries = sh scripts/fetch-binaries.sh
 - ffmpeg: ffmpeg.org 9.0.2 소스(SHA-256 고정)를 받아 오디오 전용 LGPL 구성(`--disable-gpl`, 외부 라이브러리 없음)으로 빌드합니다. 처음 한 번 1~2분 걸립니다.
 - 결과는 `~/Library/Caches/dev.mongmeo.woodshed/binaries`에 캐시되어 다음부터는 복사만 합니다. 다른 아키텍처는 `sh scripts/fetch-binaries.sh --target x86_64-apple-darwin`(또는 `universal-apple-darwin`).
 - `pnpm tauri build`는 빌드 전에 이 스크립트를 실행합니다(`beforeBuildCommand`). `mise run check`·`cargo test`·`pnpm tauri dev`는 바이너리가 없어도 됩니다. 이때 `build.rs`가 빈 자리표시 파일을 만들고, 앱은 YouTube 가져오기에서 도구를 찾을 수 없다는 오류만 보입니다. 실제로 내려받아 보려면 먼저 `mise run binaries`를 실행합니다.
-- 라이선스 고지(FFmpeg LGPL v2.1+ 전문과 빌드 구성·소스 위치, yt-dlp 번들의 GPLv3+와 소스 위치)는 [`LICENSES/`](LICENSES/README.md#bundled-programs)에 있고 앱 번들에 함께 들어갑니다.
+- 두 프로그램의 그 버전 소스 아카이브는 각 릴리스에 함께 올립니다. 라이선스 고지(FFmpeg LGPL v2.1+ 전문과 빌드 구성·소스 위치, yt-dlp 번들의 GPLv3+와 소스 위치)는 [`LICENSES/`](LICENSES/README.md#bundled-programs)에 있고 앱 번들에 함께 들어갑니다.
 
 ### 스템 분리 모델 (Demucs htdemucs_6s → Core ML)
 
@@ -181,6 +181,6 @@ Woodshed의 소스 코드는 [MIT License](LICENSE)로 공개합니다. 앱은 �
 | 드럼 샘플(VCSL)                          | 번들 리소스            | CC0-1.0                                                                                   | [`LICENSES/drum-samples.md`](LICENSES/drum-samples.md)            |
 
 - Demucs 가중치: 라이선스가 불명확합니다. Hugging Face 모델 카드에 license 필드가 없고, Demucs README([License 절, `829d2189`](https://github.com/adefossez/demucs/blob/829d21890023800713e5dd231c67e43ecc06069b/README.md#license))는 6스템 변형이 Meta 내부 데이터로만 학습되어 CC BY-NC가 적용될 가능성이 높다고 적습니다. 그래서 CC BY-NC로 보고, 이 모델을 넣은 릴리스 앱은 무료로, 비상업 용도로만 배포합니다. 출처: Meta Demucs(`htdemucs_6s`). Woodshed 소스 코드 자체는 MIT입니다. 모델은 저장소에 넣지 않고 `mise run stem-model`이 원본에서 받아 만듭니다.
-- yt-dlp와 FFmpeg는 앱이 자식 프로세스로 실행만 하고 링크하지 않습니다. 둘 다 원본을 고치지 않았고, 정확한 버전·체크섬·빌드 구성은 `scripts/fetch-binaries.sh`에 고정되어 있습니다.
+- yt-dlp와 FFmpeg는 앱이 자식 프로세스로 실행만 하고 링크하지 않습니다. 각 릴리스에 그 버전의 소스 아카이브를 함께 올립니다. 둘 다 원본을 고치지 않았고, 정확한 버전·체크섬·빌드 구성은 `scripts/fetch-binaries.sh`에 고정되어 있습니다.
 - [`DESIGN.md`](DESIGN.md)는 VoltAgent/awesome-design-md(MIT, Copyright (c) 2026 VoltAgent)에서 가져왔습니다([`LICENSES/awesome-design-md-MIT.txt`](LICENSES/awesome-design-md-MIT.txt)).
 - 의존성을 바꾸면 `mise exec -- python3 scripts/collect-licenses.py`로 Rust·npm 고지를 다시 만듭니다.

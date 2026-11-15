@@ -45,7 +45,7 @@ The app bundles two separate programs as sidecars (`Woodshed.app/Contents/MacOS/
 ### FFmpeg 9.0.2
 
 - License: GNU Lesser General Public License v2.1 or later ([`ffmpeg-LGPL-2.1.txt`](ffmpeg-LGPL-2.1.txt)). The build contains no GPL or nonfree parts (`--disable-gpl --disable-nonfree --disable-version3`) and no external libraries.
-- Source: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz> (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`, signed by the FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`). The source is unmodified.
+- Source: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz> (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`, signed by the FFmpeg release key `FCF986EA15E6E293A5644F10B4322F04D67658D8`). The source is unmodified. Each Woodshed release also carries the source archive of this exact version.
 - Build: the exact `configure` flags are in [`scripts/fetch-binaries.sh`](../scripts/fetch-binaries.sh) and are also printed by `ffmpeg -buildconf`. It is an audio-only build: file/pipe protocols; mov, matroska, ogg, mp3, aac, wav and flac demuxers; aac, opus, vorbis, mp3, flac, alac and PCM decoders; PCM WAV output; swresample.
 - FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 
@@ -54,7 +54,7 @@ The app bundles two separate programs as sidecars (`Woodshed.app/Contents/MacOS/
 - yt-dlp itself is released under the Unlicense ([`yt-dlp-LICENSE.txt`](yt-dlp-LICENSE.txt)).
 - The `yt-dlp_macos` release file is a PyInstaller bundle of Python, yt-dlp and its dependencies. It includes GPL-licensed code such as mutagen (GPL-2.0-or-later), and per the yt-dlp README the bundle as a combined work is licensed under the GPLv3+. Its components and their licenses, including the full GPL text, are in [`yt-dlp-THIRD_PARTY_LICENSES.txt`](yt-dlp-THIRD_PARTY_LICENSES.txt) (from the same tag, trailing whitespace removed).
 - Binary: <https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_macos> (SHA-256 `0f922c15ccc0b83eefa1c8bc9104e434318c4bf16e408e1ee93b7745a6efe0aa`), unmodified.
-- Source of this exact version: the tag <https://github.com/yt-dlp/yt-dlp/tree/2026.10.26> and the source archive `yt-dlp.tar.gz` on the release page <https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26>. The build recipe of the macOS bundle is `bundle/pyinstaller.py` and `.github/workflows/build.yml` at that tag. Sources of the bundled third-party components are at the projects listed in [`yt-dlp-THIRD_PARTY_LICENSES.txt`](yt-dlp-THIRD_PARTY_LICENSES.txt).
+- Source of this exact version: each Woodshed release carries its source archive. Upstream it is the tag <https://github.com/yt-dlp/yt-dlp/tree/2026.10.26> and `yt-dlp.tar.gz` on the release page <https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26>. The build recipe of the macOS bundle is `bundle/pyinstaller.py` and `.github/workflows/build.yml` at that tag. Sources of the bundled third-party components are at the projects listed in [`yt-dlp-THIRD_PARTY_LICENSES.txt`](yt-dlp-THIRD_PARTY_LICENSES.txt).
 
 ## Repository-only material
 

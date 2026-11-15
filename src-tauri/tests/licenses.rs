@@ -67,6 +67,9 @@ fn bundled_program_notices_are_present() {
     let readme = read("README.md");
     assert!(readme.contains("ffmpeg-9.0.2.tar.xz"));
     assert!(readme.contains("GPLv3+"));
+    // Each release carries the source archives of both programs.
+    assert!(readme.contains("carries the source archive of this exact version"));
+    assert!(readme.contains("each Woodshed release carries its source archive"));
 }
 
 #[test]
