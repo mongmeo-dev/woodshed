@@ -5,7 +5,9 @@ import { inTauri } from "../../lib/ipc";
 import {
   cancelSeparation,
   formatTime,
+  formatTimePrecise,
   isAudioFile,
+  type LoopRange,
   pickAudioFile,
   type SeparationEvent,
   separationFromStems,
@@ -204,6 +206,14 @@ export function StemSplitterScreen() {
 
   const speedPercent = Math.round(player.speed * 100);
   const loop = player.loop;
+  const rangeText = useCallback(
+    (range: LoopRange) =>
+      t("stems.player.timeRange", {
+        start: formatTimePrecise(range.start),
+        end: formatTimePrecise(range.end),
+      }),
+    [t],
+  );
 
   return (
     <section className="screen" aria-labelledby="screen-title-stemSplitter">
@@ -213,8 +223,127 @@ export function StemSplitterScreen() {
         </h1>
       </header>
       <div className="screen-body stems">
-        <div className="stems-layout">
-          <div className="stems-column">
+        <div className="stems-layout" data-open={opened || player.openError ? true : undefined}>
+          {(opened || player.openError) && (
+            <div className="stems-stage">
+              {player.openError && (
+                <p className="row-error" role="alert">
+                  {t("stems.errors.open")}
+                </p>
+              )}
+              {opened && (
+                <section aria-labelledby="stems-player">
+                  <h2 className="stems-section-title song-heading" id="stems-player">
+                    {opened.song.title}
+                  </h2>
+                  <div className="card player">
+                    <Waveform
+                      key={opened.song.id}
+                      peaks={opened.waveform}
+                      duration={duration}
+                      loop={loop}
+                      playing={player.playing}
+                      positionVersion={player.positionVersion}
+                      positionNow={positionNow}
+                      onSeek={(seconds) => void player.seekTo(seconds)}
+                      onLoop={(range) => void player.changeLoop(range)}
+                      labels={{
+                        position: t("stems.player.position"),
+                        loopStart: t("stems.player.loopStart"),
+                        loopEnd: t("stems.player.loopEnd"),
+                      }}
+                      timeText={formatTime}
+                      preciseTimeText={formatTimePrecise}
+                      rangeText={rangeText}
+                    />
+                    <div className="player-controls">
+                      <button
+                        type="button"
+                        className="play-button"
+                        aria-label={
+                          player.playing ? t("stems.player.pause") : t("stems.player.play")
+                        }
+                        onClick={() => void togglePlay()}
+                      >
+                        {player.playing ? <PauseIcon /> : <PlayIcon />}
+                      </button>
+                      <span className="player-time" ref={timeRef} />
+                      {loop && (
+                        <span className="loop-chip">
+                          <span>
+                            {t("stems.player.loopRange", {
+                              start: formatTimePrecise(loop.start),
+                              end: formatTimePrecise(loop.end),
+                            })}
+                          </span>
+                          <button
+                            type="button"
+                            className="icon-button icon-button-small"
+                            aria-label={t("stems.player.loopClear")}
+                            title={t("stems.player.loopClear")}
+                            onClick={() => void player.changeLoop(null)}
+                          >
+                            <CloseIcon />
+                          </button>
+                        </span>
+                      )}
+                      <div className="player-speed">
+                        <label className="player-speed-label" htmlFor="stems-speed">
+                          {t("stems.player.speed")}
+                        </label>
+                        <input
+                          id="stems-speed"
+                          type="range"
+                          className="range"
+                          min={SPEED_MIN}
+                          max={SPEED_MAX}
+                          step={1}
+                          value={speedPercent}
+                          aria-valuetext={t("stems.percent", { value: speedPercent })}
+                          onChange={(event) =>
+                            void player.changeSpeed(Number(event.target.value) / 100)
+                          }
+                        />
+                        <span className="player-speed-value">
+                          {t("stems.percent", { value: speedPercent })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+
+          {opened && (
+            <div className="stems-column stems-mixer-column">
+              <section aria-labelledby="stems-mixer">
+                <div className="stems-section-header">
+                  <h2 className="stems-section-title" id="stems-mixer">
+                    {t("stems.mixer.title")}
+                  </h2>
+                  <SeparationSlot
+                    separation={separation}
+                    onSeparate={
+                      separating || separation?.state === "done" || openReady
+                        ? undefined
+                        : () => void startSeparation(opened.song.id)
+                    }
+                    onCancel={separating ? () => void cancelSeparation(opened.song.id) : undefined}
+                  />
+                </div>
+                <Mixer
+                  tracks={opened.tracks}
+                  mix={player.mix}
+                  master={player.master}
+                  onTrack={player.changeTrack}
+                  onMaster={(value) => void player.changeMaster(value)}
+                />
+              </section>
+            </div>
+          )}
+
+          <div className="stems-column stems-library-column">
             <ImportBar
               importing={library.importing}
               error={library.error}
@@ -236,118 +365,6 @@ export function StemSplitterScreen() {
               />
             </section>
           </div>
-
-          {(opened || player.openError) && (
-            <div className="stems-column">
-              {player.openError && (
-                <p className="row-error" role="alert">
-                  {t("stems.errors.open")}
-                </p>
-              )}
-              {opened && (
-                <>
-                  <section aria-labelledby="stems-player">
-                    <h2 className="stems-section-title song-heading" id="stems-player">
-                      {opened.song.title}
-                    </h2>
-                    <div className="card player">
-                      <Waveform
-                        peaks={opened.waveform}
-                        duration={duration}
-                        loop={loop}
-                        playing={player.playing}
-                        positionVersion={player.positionVersion}
-                        positionNow={positionNow}
-                        onSeek={(seconds) => void player.seekTo(seconds)}
-                        onLoop={(range) => void player.changeLoop(range)}
-                        label={t("stems.player.position")}
-                        valueText={formatTime}
-                      />
-                      <div className="player-controls">
-                        <button
-                          type="button"
-                          className="play-button"
-                          aria-label={
-                            player.playing ? t("stems.player.pause") : t("stems.player.play")
-                          }
-                          onClick={() => void togglePlay()}
-                        >
-                          {player.playing ? <PauseIcon /> : <PlayIcon />}
-                        </button>
-                        <span className="player-time" ref={timeRef} />
-                        {loop && (
-                          <span className="loop-chip">
-                            <span>
-                              {t("stems.player.loopRange", {
-                                start: formatTime(loop.start),
-                                end: formatTime(loop.end),
-                              })}
-                            </span>
-                            <button
-                              type="button"
-                              className="icon-button icon-button-small"
-                              aria-label={t("stems.player.loopClear")}
-                              title={t("stems.player.loopClear")}
-                              onClick={() => void player.changeLoop(null)}
-                            >
-                              <CloseIcon />
-                            </button>
-                          </span>
-                        )}
-                      </div>
-                      <div className="row speed-row">
-                        <label className="row-label" htmlFor="stems-speed">
-                          {t("stems.player.speed")}
-                        </label>
-                        <input
-                          id="stems-speed"
-                          type="range"
-                          className="range"
-                          min={SPEED_MIN}
-                          max={SPEED_MAX}
-                          step={1}
-                          value={speedPercent}
-                          aria-valuetext={t("stems.percent", { value: speedPercent })}
-                          onChange={(event) =>
-                            void player.changeSpeed(Number(event.target.value) / 100)
-                          }
-                        />
-                        <span className="row-value speed-value">
-                          {t("stems.percent", { value: speedPercent })}
-                        </span>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section aria-labelledby="stems-mixer">
-                    <div className="stems-section-header">
-                      <h2 className="stems-section-title" id="stems-mixer">
-                        {t("stems.mixer.title")}
-                      </h2>
-                      <SeparationSlot
-                        separation={separation}
-                        onSeparate={
-                          separating || separation?.state === "done" || openReady
-                            ? undefined
-                            : () => void startSeparation(opened.song.id)
-                        }
-                        onCancel={
-                          separating ? () => void cancelSeparation(opened.song.id) : undefined
-                        }
-                      />
-                    </div>
-                    <Mixer
-                      tracks={opened.tracks}
-                      mix={player.mix}
-                      master={player.master}
-                      onTrack={player.changeTrack}
-                      onMaster={(value) => void player.changeMaster(value)}
-                    />
-                  </section>
-                </>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </section>

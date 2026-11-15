@@ -298,7 +298,10 @@
       "time": "{{position}} / {{duration}}",
       "speed": "Speed",
       "loopRange": "Loop {{start}}–{{end}}",
-      "loopClear": "Clear Loop"
+      "loopClear": "Clear Loop",
+      "loopStart": "Loop Start",
+      "loopEnd": "Loop End",
+      "timeRange": "{{start}}–{{end}}"
     },
     "mixer": {
       "title": "Mixer",

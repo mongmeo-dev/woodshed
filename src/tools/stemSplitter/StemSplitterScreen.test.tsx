@@ -477,16 +477,16 @@ test("dragging on the waveform sets the A-B loop, a click seeks", async () => {
   await renderOpened();
   const wave = screen.getByRole("slider", { name: "Playback Position" });
   fireEvent.pointerDown(wave, { button: 0, clientX: 100, pointerId: 1 });
-  fireEvent.pointerMove(wave, { clientX: 300, pointerId: 1 });
+  fireEvent.pointerMove(wave, { clientX: 300, pointerId: 1, buttons: 1 });
   fireEvent.pointerUp(wave, { clientX: 300, pointerId: 1 });
   await waitFor(() =>
     expect(called("stems_set_loop").at(-1)).toEqual({ range: { start: 18, end: 54 } }),
   );
-  expect(screen.getByText("Loop 0:18–0:54")).toBeTruthy();
+  expect(screen.getByText("Loop 0:18.0–0:54.0")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear Loop" }));
   await waitFor(() => expect(called("stems_set_loop").at(-1)).toEqual({ range: null }));
-  expect(screen.queryByText("Loop 0:18–0:54")).toBeNull();
+  expect(screen.queryByText("Loop 0:18.0–0:54.0")).toBeNull();
 
   fireEvent.pointerDown(wave, { button: 0, clientX: 500, pointerId: 1 });
   fireEvent.pointerUp(wave, { clientX: 500, pointerId: 1 });
@@ -499,6 +499,231 @@ test("waveform keys seek and a loop can be cleared", async () => {
   fireEvent.keyDown(position, { key: "End" });
   await waitFor(() => expect(called("stems_seek").at(-1)).toEqual({ seconds: 180 }));
   expect(screen.queryByRole("button", { name: "Clear Loop" })).toBeNull();
+});
+
+/** The waveform as 1000 px wide, so 100 px is 18 s of the 180 s song. */
+function mockWaveformWidth() {
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 1000,
+    bottom: 112,
+    width: 1000,
+    height: 112,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
+
+function dragOn(target: Element, fromX: number, toX: number) {
+  fireEvent.pointerDown(target, { button: 0, clientX: fromX, pointerId: 1 });
+  fireEvent.pointerMove(target, { clientX: toX, pointerId: 1, buttons: 1 });
+  fireEvent.pointerUp(target, { clientX: toX, pointerId: 1 });
+}
+
+function lastLoop() {
+  return (called("stems_set_loop").at(-1) as { range: { start: number; end: number } | null })
+    .range;
+}
+
+/** Opens the song and selects 0:18–0:54. */
+async function renderWithLoop() {
+  mockWaveformWidth();
+  await renderOpened();
+  dragOn(screen.getByRole("slider", { name: "Playback Position" }), 100, 300);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 54 }));
+}
+
+test("the waveform shows a time ruler, the time under the pointer and the range being dragged", async () => {
+  mockWaveformWidth();
+  await renderOpened();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  const waveform = position.closest(".waveform");
+  const ruler = waveform?.querySelector<HTMLElement>(".waveform-ruler");
+  if (!waveform || !ruler) throw new Error("no waveform ruler");
+  // Every 15 s on a 1000 px waveform; the end mark would be cut off.
+  for (const mark of ["0:00", "0:15", "1:30", "2:45"]) {
+    expect(within(ruler).getByText(mark)).toBeTruthy();
+  }
+  expect(within(ruler).queryByText("3:00")).toBeNull();
+
+  fireEvent.pointerMove(position, { clientX: 250, pointerId: 1 });
+  expect(screen.getByText("0:45.0")).toBeTruthy();
+  // The pointer time sits over the 0:45 mark and hides it; 1:30 stays.
+  expect(within(ruler).getByText("0:45").hasAttribute("data-covered")).toBe(true);
+  expect(within(ruler).getByText("1:30").hasAttribute("data-covered")).toBe(false);
+  fireEvent.pointerLeave(waveform);
+  expect(screen.queryByText("0:45.0")).toBeNull();
+
+  fireEvent.pointerDown(position, { button: 0, clientX: 100, pointerId: 1 });
+  fireEvent.pointerMove(position, { clientX: 300, pointerId: 1, buttons: 1 });
+  expect(screen.getByText("0:18.0–0:54.0")).toBeTruthy();
+  fireEvent.pointerUp(position, { clientX: 300, pointerId: 1 });
+  expect(screen.queryByText("0:18.0–0:54.0")).toBeNull();
+  expect(await screen.findByText("Loop 0:18.0–0:54.0")).toBeTruthy();
+});
+
+test("dragging near a loop edge moves only that edge, and never past the other one", async () => {
+  await renderWithLoop();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  // The end edge is at 300 px; a press a few px off it grabs the edge.
+  dragOn(position, 304, 404);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 72 }));
+  expect(screen.getByText("Loop 0:18.0–1:12.0")).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole("slider", { name: "Loop End" }));
+
+  dragOn(position, 100, 900);
+  await waitFor(() => expect(lastLoop()?.start).toBeCloseTo(71.9));
+  expect(lastLoop()?.end).toBe(72);
+  // A click on an edge without dragging neither seeks nor changes the loop.
+  const loops = called("stems_set_loop").length;
+  fireEvent.pointerDown(position, { button: 0, clientX: 400, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 400, pointerId: 1 });
+  await settle();
+  expect(called("stems_set_loop")).toHaveLength(loops);
+  expect(called("stems_seek")).toHaveLength(0);
+});
+
+test("dragging inside the loop moves it with its length, and a click inside seeks", async () => {
+  await renderWithLoop();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  dragOn(position, 200, 300);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 36, end: 72 }));
+
+  // The loop stops at the end of the song.
+  dragOn(position, 300, 1000);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 144, end: 180 }));
+
+  fireEvent.pointerDown(position, { button: 0, clientX: 900, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 900, pointerId: 1 });
+  await waitFor(() => expect(called("stems_seek").at(-1)).toEqual({ seconds: 162 }));
+  expect(lastLoop()).toEqual({ start: 144, end: 180 });
+});
+
+test("a narrow loop still moves from its middle and seeks on a click there", async () => {
+  mockWaveformWidth();
+  await renderOpened();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  // 0:18.0–0:20.0 is 11 px wide, narrower than an edge's reach on both sides.
+  dragOn(position, 100, 111.1);
+  await waitFor(() => expect(lastLoop()?.end).toBeCloseTo(20, 1));
+  const before = lastLoop();
+  if (!before) throw new Error("no loop");
+
+  dragOn(position, 105.5, 205.5);
+  await waitFor(() => expect(lastLoop()?.start).toBeCloseTo(before.start + 18, 5));
+  expect(lastLoop()?.end).toBeCloseTo(before.end + 18, 5);
+
+  fireEvent.pointerDown(position, { button: 0, clientX: 205.5, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 205.5, pointerId: 1 });
+  await waitFor(() =>
+    expect((called("stems_seek").at(-1) as { seconds: number } | undefined)?.seconds).toBeCloseTo(
+      36.99,
+    ),
+  );
+});
+
+test("a drag that ends where the loop already was sends nothing", async () => {
+  await renderWithLoop();
+  const loops = called("stems_set_loop").length;
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  // Moved and put back.
+  fireEvent.pointerDown(position, { button: 0, clientX: 200, pointerId: 1 });
+  fireEvent.pointerMove(position, { clientX: 260, pointerId: 1, buttons: 1 });
+  fireEvent.pointerUp(position, { clientX: 200, pointerId: 1 });
+  // Selecting out and back to where it started.
+  fireEvent.pointerDown(position, { button: 0, clientX: 600, pointerId: 1 });
+  fireEvent.pointerMove(position, { clientX: 700, pointerId: 1, buttons: 1 });
+  fireEvent.pointerUp(position, { clientX: 600, pointerId: 1 });
+  await settle();
+  expect(called("stems_set_loop")).toHaveLength(loops);
+  expect(screen.getByText("Loop 0:18.0–0:54.0")).toBeTruthy();
+});
+
+test("a drag whose release was missed ends at the next move without the button", async () => {
+  await renderWithLoop();
+  const loops = called("stems_set_loop").length;
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  fireEvent.pointerDown(position, { button: 0, clientX: 600, pointerId: 1 });
+  fireEvent.pointerMove(position, { clientX: 800, pointerId: 1, buttons: 1 });
+  expect(screen.getByText("1:48.0–2:24.0")).toBeTruthy();
+  fireEvent.pointerMove(position, { clientX: 850, pointerId: 1, buttons: 0 });
+  expect(screen.queryByText("1:48.0–2:24.0")).toBeNull();
+  fireEvent.pointerUp(position, { clientX: 850, pointerId: 1 });
+  await settle();
+  expect(called("stems_set_loop")).toHaveLength(loops);
+});
+
+test("arrow keys move a loop edge by a tenth of a second, and by a second with Shift", async () => {
+  await renderWithLoop();
+  const end = screen.getByRole("slider", { name: "Loop End" });
+  expect(end.getAttribute("aria-valuetext")).toBe("0:54.0");
+  expect(end.getAttribute("aria-valuemin")).toBe("18.1");
+
+  fireEvent.keyDown(end, { key: "ArrowRight" });
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 54.1 }));
+  expect(end.getAttribute("aria-valuetext")).toBe("0:54.1");
+
+  const start = screen.getByRole("slider", { name: "Loop Start" });
+  expect(start.getAttribute("aria-valuemax")).toBe("54");
+  fireEvent.keyDown(start, { key: "ArrowLeft", shiftKey: true });
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 17, end: 54.1 }));
+  expect(screen.getByText("Loop 0:17.0–0:54.1")).toBeTruthy();
+});
+
+test("a held arrow key shows the edge moving and sends only where it stops", async () => {
+  await renderWithLoop();
+  const end = screen.getByRole("slider", { name: "Loop End" });
+  fireEvent.keyDown(end, { key: "ArrowRight" });
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 54.1 }));
+  const loops = called("stems_set_loop").length;
+  for (let i = 0; i < 5; i++) fireEvent.keyDown(end, { key: "ArrowRight", repeat: true });
+  expect(end.getAttribute("aria-valuetext")).toBe("0:54.6");
+  expect(screen.getByText("0:18.0–0:54.6")).toBeTruthy();
+  await settle();
+  expect(called("stems_set_loop")).toHaveLength(loops);
+
+  fireEvent.keyUp(end, { key: "ArrowRight" });
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 54.6 }));
+  expect(called("stems_set_loop")).toHaveLength(loops + 1);
+});
+
+test("changing the loop while playing past its new end jumps to the loop start", async () => {
+  await renderWithLoop();
+  const position = screen.getByRole("slider", { name: "Playback Position" });
+  // Seek to 0:50 (inside the loop) and play.
+  fireEvent.pointerDown(position, { button: 0, clientX: 278, pointerId: 1 });
+  fireEvent.pointerUp(position, { clientX: 278, pointerId: 1 });
+  fireEvent.click(screen.getByRole("button", { name: "Play" }));
+  await waitFor(() => expect(backend.applied.playing).toBe(true));
+  await waitFor(() => expect(backend.applied.position).toBeCloseTo(50.04, 1));
+  const seeks = called("stems_seek").length;
+
+  // The end edge goes from 0:54 to 0:45, behind the playhead.
+  dragOn(position, 300, 250);
+  await waitFor(() => expect(lastLoop()).toEqual({ start: 18, end: 45 }));
+  await waitFor(() => expect(called("stems_seek").slice(seeks)).toEqual([{ seconds: 18 }]));
+
+  // A change that keeps the playhead inside the loop does not jump.
+  dragOn(position, 100, 56);
+  await waitFor(() => expect(lastLoop()?.start).toBeCloseTo(10.08));
+  await settle();
+  expect(called("stems_seek").slice(seeks)).toEqual([{ seconds: 18 }]);
+});
+
+test("opening another song clears the pointer line of the last one", async () => {
+  backend.secondSong = true;
+  mockWaveformWidth();
+  await renderOpened();
+  fireEvent.pointerMove(screen.getByRole("slider", { name: "Playback Position" }), {
+    clientX: 900,
+    pointerId: 1,
+  });
+  expect(document.querySelector(".waveform-hover")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Second Song/ }));
+  expect(await screen.findByRole("heading", { name: "Second Song" })).toBeTruthy();
+  expect(document.querySelector(".waveform-hover")).toBeNull();
 });
 
 test("a link that is not a YouTube video shows a short error", async () => {
@@ -618,7 +843,7 @@ test("an output change re-applies a pending seek, speed, loop and mute", async (
   });
   await changeOutputAfter(() => {
     fireEvent.pointerDown(position, { button: 0, clientX: 100, pointerId: 1 });
-    fireEvent.pointerMove(position, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(position, { clientX: 300, pointerId: 1, buttons: 1 });
     fireEvent.pointerUp(position, { clientX: 300, pointerId: 1 });
   });
   expect(backend.applied.loop).toEqual({ start: 18, end: 54 });
