@@ -25,6 +25,13 @@ export const UPDATE_TEST_MODE = "update-test";
 /** Installs a found update without a click. Update test builds only. */
 export const AUTO_INSTALL = import.meta.env.MODE === UPDATE_TEST_MODE;
 
+/**
+ * Written to `<html data-update-test>` by the auto install branch. A DOM write
+ * survives minification (unlike a console call), so its presence in a built
+ * frontend means the branch is there: scripts/check-release-dist.mjs refuses it.
+ */
+export const UPDATE_TEST_MARKER = "woodshed-update-test";
+
 /** Updates work only inside the Tauri app. */
 export function updatesSupported(): boolean {
   return inTauri();
