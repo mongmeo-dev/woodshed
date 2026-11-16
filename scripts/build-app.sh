@@ -4,9 +4,12 @@
 # With the local signing identity (scripts/create-local-signing-cert.sh) the
 # app is signed with it, so every rebuild keeps one code identity and macOS
 # keeps the microphone permission. Without it the build is ad-hoc signed as
-# before. Extra arguments go to `tauri build`.
+# before. Extra arguments go to `tauri build`, except
+# those that change its config (scripts/release-guard.sh).
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/release-guard.sh
+woodshed_release_guard "$@"
 
 . scripts/local-signing.sh
 
@@ -24,8 +27,8 @@ else
   echo "no local signing identity: ad-hoc signed build (see scripts/create-local-signing-cert.sh)"
   pnpm tauri build "$@"
 fi
-# A --config that swaps in the update test frontend (installs updates without
-# a click) must not leave an app here; that build is scripts/build-update-test.sh.
+# The bundled frontend is dist/ (release-guard.sh refuses other configs): it
+# must not be an update test build (installs updates without a click).
 if ! node scripts/check-release-dist.mjs; then
   rm -rf src-tauri/target/release/bundle/macos/Woodshed.app
   echo "error: refused an update test frontend; removed the app" >&2
