@@ -2,14 +2,14 @@
 
 Woodshed itself is released under the MIT License ([`../LICENSE`](../LICENSE)). This directory holds the notices of the third-party parts the app is built from or ships with, and it ships inside the app (`Contents/Resources/LICENSES/`).
 
-| Part                                | How it reaches the app     | License                                           | Notice                                                                       |
-| ----------------------------------- | -------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Rust crates (Tauri, audio, Core ML) | linked into the app binary | MIT, Apache-2.0, MPL-2.0, BSD, Zlib, Unicode …    | [`rust-crates.md`](rust-crates.md), [`rust-crates.txt`](rust-crates.txt)     |
-| npm packages (React, i18next, …)    | bundled into the web view  | MIT, Apache-2.0 OR MIT                            | [`npm-packages.md`](npm-packages.md), [`npm-packages.txt`](npm-packages.txt) |
-| FFmpeg 9.0.2                        | separate program (sidecar) | LGPL-2.1-or-later                                 | [FFmpeg](#ffmpeg-902), [`ffmpeg-LGPL-2.1.txt`](ffmpeg-LGPL-2.1.txt)          |
-| yt-dlp 2026.10.26 (`yt-dlp_macos`)  | separate program (sidecar) | Unlicense; the bundle as a whole GPL-3.0-or-later | [yt-dlp](#yt-dlp-20261026-yt-dlp_macos)                                      |
-| Demucs `htdemucs_6s` (Core ML)      | bundled resource           | code MIT; **weights: presumed CC BY-NC**          | [Stem separation model](#stem-separation-model-bundled-resource)             |
-| Drum samples (VCSL)                 | bundled resource           | CC0-1.0                                           | [`drum-samples.md`](drum-samples.md), [`CC0-1.0.txt`](CC0-1.0.txt)           |
+| Part                                | How it reaches the app     | License                                             | Notice                                                                       |
+| ----------------------------------- | -------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Rust crates (Tauri, audio, Core ML) | linked into the app binary | MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode … | [`rust-crates.md`](rust-crates.md), [`rust-crates.txt`](rust-crates.txt)     |
+| npm packages (React, i18next, …)    | bundled into the web view  | MIT, Apache-2.0 OR MIT                              | [`npm-packages.md`](npm-packages.md), [`npm-packages.txt`](npm-packages.txt) |
+| FFmpeg 9.0.2                        | separate program (sidecar) | LGPL-2.1-or-later                                   | [FFmpeg](#ffmpeg-902), [`ffmpeg-LGPL-2.1.txt`](ffmpeg-LGPL-2.1.txt)          |
+| yt-dlp 2026.10.26 (`yt-dlp_macos`)  | separate program (sidecar) | Unlicense; the bundle as a whole GPL-3.0-or-later   | [yt-dlp](#yt-dlp-20261026-yt-dlp_macos)                                      |
+| Demucs `htdemucs_6s` (Core ML)      | bundled resource           | code MIT; **weights: presumed CC BY-NC**            | [Stem separation model](#stem-separation-model-bundled-resource)             |
+| Drum samples (VCSL)                 | bundled resource           | CC0-1.0                                             | [`drum-samples.md`](drum-samples.md), [`CC0-1.0.txt`](CC0-1.0.txt)           |
 
 No dependency of the app is under the GPL. The only GPL code shipped is inside the separate `yt-dlp_macos` program, which the app runs as a child process.
 

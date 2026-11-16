@@ -206,7 +206,7 @@ Woodshed의 소스 코드는 [MIT License](LICENSE)로 공개합니다. 앱은 �
 
 | 구성 요소                                | 앱에 들어가는 방식     | 라이선스                                                                                  | 고지                                                              |
 | ---------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Rust 크레이트(Tauri, 오디오, Core ML 등) | 앱 바이너리에 링크     | MIT, Apache-2.0, MPL-2.0, BSD, Zlib, Unicode 등(GPL 없음)                                 | [`LICENSES/rust-crates.md`](LICENSES/rust-crates.md)              |
+| Rust 크레이트(Tauri, 오디오, Core ML 등) | 앱 바이너리에 링크     | MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode 등(GPL 없음)                            | [`LICENSES/rust-crates.md`](LICENSES/rust-crates.md)              |
 | npm 패키지(React, i18next 등)            | 웹뷰 번들              | MIT, Apache-2.0 OR MIT(GPL 없음)                                                          | [`LICENSES/npm-packages.md`](LICENSES/npm-packages.md)            |
 | FFmpeg 9.0.2                             | 별도 프로그램(sidecar) | LGPL-2.1-or-later, 오디오 전용 구성(`--disable-gpl --disable-nonfree --disable-version3`) | [빌드 구성·소스 위치](LICENSES/README.md#ffmpeg-902)              |
 | yt-dlp 2026.10.26 `yt-dlp_macos`         | 별도 프로그램(sidecar) | yt-dlp는 Unlicense, PyInstaller 번들 전체는 GPLv3+                                        | [소스 위치](LICENSES/README.md#yt-dlp-20261026-yt-dlp_macos)      |
