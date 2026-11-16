@@ -12,6 +12,9 @@ set -eu
 
 YTDLP_VERSION=2026.10.26
 YTDLP_SHA256=0f922c15ccc0b83eefa1c8bc9104e434318c4bf16e408e1ee93b7745a6efe0aa
+# yt-dlp.tar.gz of the same tag (source), which scripts/release.sh attaches to
+# each release; listed with the binary in that tag's SHA2-256SUMS.
+YTDLP_SOURCE_SHA256=21f942d258d25cc4e60b4982a25c423460f0bebb835f38e6dfd1fcb140087f95
 FFMPEG_VERSION=9.0.2
 FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 MACOS_MIN=13.0

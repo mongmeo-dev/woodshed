@@ -56,3 +56,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Release files (scripts/release.sh)
+/releases/
