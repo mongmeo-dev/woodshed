@@ -49,3 +49,7 @@ run = [
   "mise run check:web",
   "mise run check:rust",
 ]
+
+[tasks.release]
+description = "Release X.Y.Z to GitHub: version commit and tag, notarized app and DMG, update files (README)"
+run = "sh scripts/release.sh"
