@@ -48,6 +48,10 @@ ml = ct.convert(
 ml.short_description = (
     "htdemucs_6s core (STFT/iSTFT outside). sources: drums,bass,other,vocals,guitar,piano"
 )
-ml.license = "MIT (Demucs, Meta Platforms)"
+# Code and weights differ; see LICENSES/README.md "Stem separation model".
+ml.license = (
+    "Code: MIT (Demucs, Meta Platforms). Weights: license unclear, trained only on "
+    "Meta internal data, presumed CC BY-NC; non-commercial use only. Source: Meta Demucs"
+)
 ml.save(out_path)
 print(f"fp32 converted in {time.time() - t0:.1f}s -> {out_path}")
