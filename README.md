@@ -9,7 +9,13 @@
 
 ## 설치
 
-macOS 13 이상에서 동작합니다. 릴리스에서 내려받는 방법은 첫 릴리스와 함께 이 절에 적습니다. 그 전에는 아래 [소스에서 빌드](#소스에서-빌드)를 따릅니다.
+Apple Silicon Mac, macOS 13 이상에서 동작합니다.
+
+1. [Releases](https://github.com/mongmeo-dev/woodshed/releases/latest)에서 `Woodshed_<버전>_aarch64.dmg`를 받습니다.
+2. DMG를 열고 `Woodshed.app`을 `Applications` 폴더로 끌어 놓습니다.
+3. 앱을 엽니다. 튜너를 쓰거나 기본 출력 장치에 입력이 있으면 마이크 권한을 묻습니다.
+
+새 버전이 나오면 사이드바 아래에 '업데이트 설치' 버튼이 보입니다. 누르면 받아서 설치하고 다시 시작합니다. Intel Mac용 릴리스는 없으니 [소스에서 빌드](#소스에서-빌드)를 따릅니다.
 
 ## 소스에서 빌드
 
@@ -70,6 +76,7 @@ mise run app:release    # = sh scripts/build-release.sh
 - 키체인은 `~/Library/Keychains/woodshed-release.keychain-db`, 암호는 `~/Library/Application Support/woodshed-release/`에 둡니다. 로그인 키체인은 SSH 세션 같은 비대화형 환경에서 서명할 수 없어(`errSecInternalComponent`) 쓰지 않습니다.
 - hardened runtime과 `src-tauri/Entitlements.plist`로 서명합니다. 마이크(`device.audio-input`)와, yt-dlp(PyInstaller)가 실행 중 푼 Python 라이브러리를 불러오도록 `cs.disable-library-validation`을 줍니다. Tauri는 이 파일을 sidecar 서명에도 씁니다.
 - 빌드 끝에 공증·staple을 하고 `codesign --verify --deep --strict`, `stapler validate`, `spctl`로 확인합니다. Developer ID 앱은 로컬 서명 앱과 다른 앱으로 보여 마이크 권한을 한 번 다시 묻습니다.
+- 출시 설정(`src-tauri/tauri.release.conf.json`)은 업데이트 파일(`bundle.createUpdaterArtifacts`)도 켭니다. 그래서 이 빌드에는 [업데이트 서명 키](#업데이트-서명-키)가 있어야 하고, 앱 옆에 `Woodshed.app.tar.gz`와 `.sig`가 생깁니다. GitHub 릴리스는 [릴리스](#릴리스)의 `mise run release`로 만듭니다.
 
 ### 업데이트 서명 키
 
@@ -85,7 +92,7 @@ sh scripts/create-updater-key.sh   # 한 번. 이미 있으면 다시 만들지 
   - `updater-key-password`: 개인키 암호
 - **세 파일을 함께 백업하세요**(암호 관리자나 암호화한 외장 저장소 등, 저장소 밖). 개인키나 암호를 잃으면 새 업데이트에 서명할 수 없고, 이미 설치된 앱은 더 이상 업데이트되지 않습니다. 키를 새로 만들면 사용자가 새 버전을 직접 받아 설치해야 합니다.
 - 릴리스 빌드는 `TAURI_SIGNING_PRIVATE_KEY`(키 파일 경로나 내용)와 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`로 이 키를 넘깁니다. 경로 변수는 `scripts/release-signing.sh`의 `WOODSHED_UPDATER_KEY`, `WOODSHED_UPDATER_KEY_PASSWORD_FILE`입니다.
-- 업데이트 파일(`bundle.createUpdaterArtifacts`)은 빌드할 때 개인키가 있어야 하므로 기본 설정에 넣지 않습니다. `mise run app`은 키 없이 빌드됩니다.
+- 업데이트 파일(`bundle.createUpdaterArtifacts`)은 빌드할 때 개인키가 있어야 하므로 기본 설정에 넣지 않고 출시 설정에서만 켭니다. `mise run app`은 키 없이 빌드되고, `mise run app:release`(`scripts/build-release.sh`)가 키를 넘깁니다. 키 값은 로그에 찍지 않습니다.
 - 앱은 실행 3초 뒤 한 번 확인하고(실패는 조용히 넘김), 새 버전이 있으면 사이드바 아래에 '업데이트 설치' 버튼을 보입니다. 설치는 누를 때만 하고, 끝나면 앱이 다시 시작됩니다.
 
 #### 로컬 서버로 업데이트 확인
@@ -104,6 +111,65 @@ sh scripts/build-update-test.sh 0.1.0 18765 <임시 폴더>/new --updater-artifa
 - 스크립트는 앱과 업데이트 파일을 지정한 폴더로 옮기고 `dist/`를 지워, `target/`에 테스트 빌드를 남기지 않습니다.
 - `pnpm build`, `mise run app`, `mise run app:release`는 빌드한 `dist/`를 `scripts/check-release-dist.mjs`로 검사합니다. 자동 설치 코드가 들어 있으면 실패하고, 앱 빌드는 만든 앱을 지웁니다.
 - `mise run app`·`mise run app:release`는 앱에 들어가는 프런트엔드를 바꿀 수 있는 설정을 받지 않습니다(`scripts/release-guard.sh`). `--config`·`-c` 인자, `TAURI_CONFIG`·`TAURI_FRONTEND_PATH`·`TAURI_APP_PATH`·`TAURI_PATH` 환경 변수, CLI가 스스로 합치는 `src-tauri/tauri.macos.conf.json`(`.json5`, `Tauri.macos.toml`, `Tauri.toml`)이 있으면 빌드 전에 멈춥니다.
+
+### 릴리스
+
+GitHub 릴리스는 손으로 만듭니다(CI 없음). Apple Silicon Mac에서, 깨끗한 `main`이 `origin/main`과 같을 때 실행합니다.
+
+```sh
+mise run release -- 0.2.0 --dry-run   # 같은 파일을 만들고 검증만. push·릴리스 없음
+mise run release -- 0.2.0             # 실제 릴리스
+mise run release -- 0.2.0 --notes-file notes.md   # 릴리스 본문과 latest.json notes (기본: "Woodshed 0.2.0")
+```
+
+필요한 것: 출시 키체인과 `notary.env`([배포 빌드](#배포-빌드-developer-id-서명공증)), [업데이트 서명 키](#업데이트-서명-키), `gh auth login`(저장소에 push·릴리스 권한), 네트워크(공증, 소스 아카이브, 첫 빌드의 모델 변환).
+
+`scripts/release.sh`가 하는 일:
+
+1. 확인: `main`이고 작업 트리가 깨끗하며 `origin/main`과 같은지, 태그 `v<버전>`과 그 릴리스가 로컬·원격에 없는지, 새 버전이 현재 버전과 기존 태그보다 큰 `X.Y.Z`인지, gh 로그인·출시 키체인·`notary.env`·업데이트 키가 있는지, 업데이트 공개키가 `tauri.conf.json`의 `plugins.updater.pubkey`와 같은지 봅니다.
+2. yt-dlp·FFmpeg 소스 아카이브를 받아 `scripts/fetch-binaries.sh`의 고정 체크섬(`YTDLP_SOURCE_SHA256`, `FFMPEG_SHA256`)과 대조합니다.
+3. `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`에 버전을 쓰고 커밋 "버전 X.Y.Z"와 annotated 태그 `vX.Y.Z`를 만듭니다.
+4. `scripts/build-release.sh`로 Developer ID 서명·공증·staple한 앱과 서명된 업데이트 파일을 만들고, 앱을 담은 DMG를 서명·공증·staple합니다. 빌드가 추적 파일을 바꾸면 멈춥니다.
+5. 검증: `latest.json`의 서명을 `tauri.conf.json`의 공개키로 확인하고(바꾼 파일은 거부되는지도), DMG를 `spctl --type open`으로, DMG 안과 업데이트 파일 안의 앱을 `codesign`·`stapler validate`·`spctl --type execute`·버전으로 확인합니다.
+6. 커밋과 태그를 한 번에(`git push --atomic`) push하고, 초안 릴리스를 만들어 자산을 모두 올린 뒤 latest로 공개합니다. 앱이 읽는 `latest.json`은 공개된 뒤에야 보입니다.
+
+산출물은 `releases/v<버전>/`(git 무시)에 모입니다.
+
+| 파일                                           | 내용                                                                       |
+| ---------------------------------------------- | -------------------------------------------------------------------------- |
+| `Woodshed_<버전>_aarch64.dmg`                  | 공증한 앱을 담은 DMG(DMG도 서명·공증·staple)                               |
+| `Woodshed_<버전>_aarch64.app.tar.gz`           | 업데이트 파일(공증한 앱)                                                   |
+| `Woodshed_<버전>_aarch64.app.tar.gz.sig`       | 업데이트 서명                                                              |
+| `latest.json`                                  | `version`, `notes`, `pub_date`, `platforms.darwin-aarch64.{signature,url}` |
+| `ffmpeg-<버전>.tar.xz`, `yt-dlp-<버전>.tar.gz` | 앱에 들어간 sidecar의 소스([라이선스](#라이선스))                          |
+| `SHA256SUMS`                                   | 위 파일의 SHA-256                                                          |
+| `release-notes.md`                             | 릴리스 본문(올리지 않음)                                                   |
+
+- `--dry-run`은 같은 파일을 만들고 같은 검증까지 합니다. 공증은 실제로 Apple에 제출합니다. push와 릴리스 생성은 하지 않고, 끝나면 버전 커밋과 태그를 지워 브랜치와 작업 트리를 원래대로 둡니다. `--allow-branch`를 더하면 `main`이 아닌 브랜치에서도 시험할 수 있습니다(dry-run 전용).
+- 업데이트 엔드포인트는 `releases/latest/download/latest.json`이라, 초안과 프리릴리스는 설치된 앱에 보이지 않습니다.
+
+#### 실패했을 때
+
+- **push 전 실패**(확인, 빌드, 공증, 검증): 스크립트가 버전 커밋과 태그를 지우고 멈춥니다. 원인을 고치고 같은 명령을 다시 실행합니다.
+- **공증 거부**: `notarytool log`가 거부 사유를 출력합니다. 서명·entitlements를 고친 뒤 다시 실행합니다.
+- **push 실패**(`origin/main`이 앞서 나감, 권한이나 `main` 보호 규칙 등): `--atomic`이라 커밋도 태그도 올라가지 않고, 로컬도 되돌려집니다. `git pull` 뒤 다시 실행합니다.
+- **업로드 실패**(push 뒤): 커밋과 태그는 이미 원격에 있습니다. 같은 파일로 업로드만 다시 합니다. 초안이 남아 있으면 이어서 올리고, 같은 이름의 자산은 덮어씁니다.
+
+  ```sh
+  mise run release -- 0.2.0 --upload-only
+  ```
+
+- **잘못 올린 릴리스**: 이미 받은 앱이 있을 수 있으니 지우지 말고, 고친 새 버전을 올립니다. 공개 직후 바로 거둬야 하면 `gh release edit v0.2.0 --draft=true`로 숨깁니다. 그러면 `latest.json`은 그 이전 릴리스를 가리킵니다.
+
+#### 키 백업
+
+아래 파일을 저장소 밖(암호 관리자, 암호화한 외장 저장소 등)에 함께 백업합니다. `notary.env`와 업데이트 키는 `~/Library/Application Support/woodshed-release/`에, 인증서는 출시 키체인에 있습니다. `.p12` 원본과 `.p8`은 `create-release-keychain.sh`와 `APPLE_API_KEY_PATH`에 준 위치에 있습니다. 어느 것도 저장소에 넣지 않습니다.
+
+| 키                              | 파일                                                     | 잃으면                                                                                                          |
+| ------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Developer ID Application 인증서 | 키체인에 넣은 `.p12`와 그 암호                           | Apple Developer에서 새 인증서를 발급해 `create-release-keychain.sh`로 다시 넣습니다. 발급 수에 제한이 있습니다. |
+| 공증용 App Store Connect API 키 | `AuthKey_<키 ID>.p8`, `notary.env`(키 ID, 발급자 ID)     | `.p8`은 한 번만 내려받을 수 있습니다. App Store Connect에서 키를 폐기하고 새로 만듭니다.                        |
+| 업데이트 서명 키                | `updater.key`, `updater.key.pub`, `updater-key-password` | **대신할 수 없습니다.** 새 키로 서명한 업데이트는 설치된 앱이 거부하므로, 사용자가 새 DMG를 직접 받아야 합니다. |
 
 ### 첫 실행과 마이크 권한
 
