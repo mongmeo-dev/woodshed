@@ -20,9 +20,16 @@
 # 4. Verifies: the latest.json signature against the updater public key in
 #    tauri.conf.json, Gatekeeper (spctl) on the DMG and on the app in the DMG
 #    and in the update archive, stapled tickets, and the version of each app.
-# 5. Pushes the commit and tag together, then makes the GitHub release: a
-#    draft, all assets, then published as latest. If the upload fails, rerun
-#    with --upload-only: it verifies releases/vX.Y.Z/ again and uploads it.
+#    It records the commit the files were built from, and whether a dry run
+#    made them, in releases/vX.Y.Z/provenance.json.
+# 5. Pushes the commit and tag together (scripts/release-lib.sh). When git
+#    reports a failure, origin decides: with the tag there it was pushed, with
+#    neither ref it was not (undone here), and otherwise nothing is touched.
+# 6. Makes the GitHub release: a draft, all files uploaded and compared by
+#    SHA-256, then published as latest. A published release is never changed,
+#    nor an older version made latest. If the upload fails, rerun with
+#    --upload-only: it uploads releases/vX.Y.Z/ only when provenance.json says
+#    it was built (not dry run) from the commit the tag points to on origin.
 #
 # --dry-run makes and verifies the same files but pushes nothing and makes no
 # release; at the end (and on any failure before the push) the version commit
@@ -77,15 +84,7 @@ cd "$(dirname "$0")/.."
 . scripts/release-guard.sh
 woodshed_release_guard
 . scripts/release-signing.sh
-
-step() {
-  printf '\n==> %s\n' "$*"
-}
-
-fail() {
-  echo "error: $*" >&2
-  exit 1
-}
+. scripts/release-lib.sh
 
 if [ "$upload_only" = true ]; then
   node scripts/release-files.mjs valid "$version"
@@ -129,42 +128,6 @@ mounted=false
 orig_head=""
 release_commit=""
 
-# Puts the branch back where it was: removes the version commit and tag (only
-# while they are ours and not pushed). Runs at the end of a dry run and on
-# any failure before the push.
-restore_git() {
-  [ "$bumped" = true ] && [ "$pushed" = false ] || return 0
-  bumped=false
-  if [ -n "$release_commit" ] &&
-    [ "$(git rev-parse -q --verify "refs/tags/$tag^{commit}" || true)" = "$release_commit" ]; then
-    git tag -d "$tag" >/dev/null
-  fi
-  head=$(git rev-parse HEAD)
-  if [ "$head" = "$release_commit" ] || [ "$head" = "$orig_head" ]; then
-    git reset -q --hard "$orig_head"
-  else
-    echo "warning: HEAD moved to $head during the release; left as is (was $orig_head)" >&2
-    return 1
-  fi
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "warning: working tree is not clean after restoring $orig_head" >&2
-    return 1
-  fi
-  echo "restored: $(git rev-parse --abbrev-ref HEAD) at $(git rev-parse --short HEAD), no tag $tag, clean working tree"
-}
-
-on_exit() {
-  status=$?
-  if [ "$mounted" = true ]; then
-    hdiutil detach -quiet -force "$work/mnt" || true
-  fi
-  rm -rf "$work"
-  if [ "$bumped" = true ] && [ "$pushed" = false ]; then
-    echo "release stopped before anything was pushed; removing the version commit and tag" >&2
-    restore_git || true
-  fi
-  exit "$status"
-}
 trap on_exit EXIT
 trap 'exit 130' INT TERM HUP
 
@@ -196,15 +159,6 @@ check_keys() {
     fail "$WOODSHED_UPDATER_KEY.pub is not plugins.updater.pubkey in tauri.conf.json"
 }
 
-# exits 0 when origin has the tag, 1 when it does not; fails on a network error.
-remote_has_tag() {
-  code=0
-  git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || code=$?
-  [ "$code" = 0 ] && return 0
-  [ "$code" = 2 ] || fail "cannot list the tags of origin (git ls-remote exit $code)"
-  return 1
-}
-
 check_git() {
   [ -z "$(git status --porcelain)" ] || fail "working tree is not clean (git status)"
   git fetch -q origin main
@@ -217,7 +171,8 @@ check_git() {
     echo "dry run on $(git rev-parse --abbrev-ref HEAD) (--allow-branch): branch checks skipped"
   fi
   ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || fail "tag $tag already exists here"
-  ! remote_has_tag || fail "tag $tag already exists on origin"
+  refs=$(remote_refs) || fail "cannot read origin"
+  [ "${refs#* }" = - ] || fail "tag $tag already exists on origin"
   ! gh release view "$tag" -R "$repo" >/dev/null 2>&1 || fail "release $tag already exists on $repo"
   tags=$({
     git tag -l 'v*'
@@ -327,6 +282,8 @@ build_files() {
     "$out/$archive_name.sig" "$download_base/$archive_name"
   (cd "$out" && shasum -a 256 "$dmg_name" "$archive_name" "$archive_name.sig" latest.json \
     "$ffmpeg_source" "$ytdlp_source" >SHA256SUMS)
+  # shellcheck disable=SC2086
+  node scripts/release-files.mjs provenance-write "$out" "$version" "$release_commit" "$dry_run" $assets
 }
 
 # ---- verification --------------------------------------------------------------
@@ -367,33 +324,6 @@ verify_files() {
   rm -rf "$extracted"
 }
 
-# ---- push and upload ------------------------------------------------------------
-
-# Each step returns instead of exiting, so a failure can print how to retry.
-upload_release() {
-  if ! gh release view "$tag" -R "$repo" >/dev/null 2>&1; then
-    gh release create "$tag" -R "$repo" --verify-tag --draft --title "Woodshed $version" \
-      --notes-file "$out/release-notes.md" || return 1
-  fi
-  set --
-  for asset in $assets; do
-    set -- "$@" "$out/$asset"
-  done
-  gh release upload "$tag" -R "$repo" --clobber "$@" || return 1
-  gh release edit "$tag" -R "$repo" --draft=false --latest || return 1
-}
-
-upload_or_explain() {
-  step "GitHub release $tag ($repo)"
-  if ! upload_release; then
-    echo "error: the upload of release $tag failed. The commit and tag are on origin." >&2
-    echo "Retry the upload only, with the same files in $out:" >&2
-    echo "  mise run release -- $version --upload-only" >&2
-    exit 1
-  fi
-  echo "released: https://github.com/$repo/releases/tag/$tag"
-}
-
 list_files() {
   step "files in $out"
   (cd "$out" && ls -l $assets)
@@ -404,7 +334,7 @@ list_files() {
 if [ "$upload_only" = true ]; then
   step "upload only: $tag"
   check_gh
-  remote_has_tag || fail "tag $tag is not on origin; run a full release instead"
+  check_upload_source
   if [ -n "$notes_file" ]; then
     cp "$notes_file" "$out/release-notes.md"
   fi
@@ -434,7 +364,5 @@ if [ "$dry_run" = true ]; then
   exit 0
 fi
 
-step "push $tag and main"
-git push --atomic origin "$release_commit:refs/heads/main" "refs/tags/$tag"
-pushed=true
+push_release
 upload_or_explain
