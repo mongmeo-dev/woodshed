@@ -13,6 +13,7 @@ import {
   type AvailableUpdate,
   checkForUpdate,
   currentVersion,
+  UPDATE_TEST_MARKER,
   updatesSupported,
 } from "../lib/updater";
 
@@ -102,7 +103,7 @@ export function UpdaterProvider({
       }
       if (found && AUTO_INSTALL) {
         // Marker for scripts/check-release-dist.mjs: never in a release bundle.
-        console.info("woodshed-update-test: installing without a click");
+        document.documentElement.dataset.updateTest = UPDATE_TEST_MARKER;
         await install();
       }
     },

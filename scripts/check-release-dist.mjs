@@ -8,6 +8,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+// src/lib/updater.ts UPDATE_TEST_MARKER, written by the auto install branch.
 const AUTO_INSTALL_MARKER = "woodshed-update-test";
 
 function files(dir) {

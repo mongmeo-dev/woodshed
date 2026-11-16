@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { AUTO_INSTALL, UPDATE_TEST_MODE } from "../lib/updater";
+import { AUTO_INSTALL, UPDATE_TEST_MARKER, UPDATE_TEST_MODE } from "../lib/updater";
 
 const SCRIPT = "scripts/check-release-dist.mjs";
 const dirs: string[] = [];
@@ -31,12 +31,34 @@ test("auto install is off outside the update test mode", () => {
 });
 
 test("the release check refuses a frontend with the auto install code", () => {
-  const marker = /console\.info\("(woodshed-update-test)[^"]*"\)/.exec(
-    readFileSync("src/updater/UpdaterProvider.tsx", "utf8"),
-  )?.[1];
-  expect(marker).toBeDefined();
-  expect(readFileSync(SCRIPT, "utf8")).toContain(`"${marker}"`);
+  // The marker is a DOM write in the branch, not a log a minifier may drop.
+  expect(readFileSync("src/updater/UpdaterProvider.tsx", "utf8")).toMatch(
+    /if \(found && AUTO_INSTALL\) \{[^}]*document\.documentElement\.dataset\.updateTest = UPDATE_TEST_MARKER;[^}]*await install\(\);/,
+  );
+  expect(readFileSync(SCRIPT, "utf8")).toContain(`"${UPDATE_TEST_MARKER}"`);
 
-  expect(checkDist(dist(`t&&(console.info(\`${marker}: installing\`),await d())`))).toBe(1);
+  // As the minifier leaves it, with console calls dropped.
+  expect(
+    checkDist(
+      dist(
+        `var On=\`${UPDATE_TEST_MARKER}\`;t&&(document.documentElement.dataset.updateTest=On,await d())`,
+      ),
+    ),
+  ).toBe(1);
   expect(checkDist(dist("finally{c.current=null}"))).toBe(0);
+});
+
+test("the app's frontend is dist/ built and checked by pnpm build, and the entry point configs leave it alone", () => {
+  const base = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+  expect(base.build.frontendDist).toBe("../dist");
+  expect(base.build.beforeBuildCommand).toMatch(/&& pnpm build$/);
+  const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+  expect(scripts.build).toMatch(/&& node scripts\/check-release-dist\.mjs$/);
+  for (const file of ["tauri.local-signing.conf.json", "tauri.release.conf.json"]) {
+    const config = JSON.parse(readFileSync(`src-tauri/${file}`, "utf8"));
+    expect(config.build?.frontendDist, file).toBeUndefined();
+    expect(config.build?.beforeBuildCommand, file).toBeUndefined();
+    expect(config.build?.devUrl, file).toBeUndefined();
+    expect(config.plugins?.updater, file).toBeUndefined();
+  }
 });
