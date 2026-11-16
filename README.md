@@ -131,7 +131,11 @@ mise run release -- 0.2.0 --notes-file notes.md   # 릴리스 본문과 latest.j
 3. `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`에 버전을 쓰고 커밋 "버전 X.Y.Z"와 annotated 태그 `vX.Y.Z`를 만듭니다.
 4. `scripts/build-release.sh`로 Developer ID 서명·공증·staple한 앱과 서명된 업데이트 파일을 만들고, 앱을 담은 DMG를 서명·공증·staple합니다. 빌드가 추적 파일을 바꾸면 멈춥니다.
 5. 검증: `latest.json`의 서명을 `tauri.conf.json`의 공개키로 확인하고(바꾼 파일은 거부되는지도), DMG를 `spctl --type open`으로, DMG 안과 업데이트 파일 안의 앱을 `codesign`·`stapler validate`·`spctl --type execute`·버전으로 확인합니다.
-6. 커밋과 태그를 한 번에(`git push --atomic`) push하고, 초안 릴리스를 만들어 자산을 모두 올린 뒤 latest로 공개합니다. 앱이 읽는 `latest.json`은 공개된 뒤에야 보입니다.
+6. 빌드한 커밋과 dry-run 여부, 자산별 SHA-256을 `provenance.json`에 남깁니다.
+7. 커밋과 태그를 한 번에(`git push --atomic`) push합니다.
+8. 초안 릴리스를 만들어 자산을 모두 올립니다. 올라간 자산의 SHA-256(GitHub digest)이 로컬 파일과 모두 같은지 확인한 뒤에 latest로 공개합니다. 앱이 읽는 `latest.json`은 공개된 뒤에야 보입니다.
+   - 이미 공개된 릴리스는 고치지 않습니다. 자산이 같으면 완료로 보고, 다르면 거부합니다.
+   - 더 높은 버전이 이미 공개돼 있으면 공개하지 않습니다. 오래된 버전이 latest가 되지 않게 하려는 것입니다.
 
 산출물은 `releases/v<버전>/`(git 무시)에 모입니다.
 
@@ -144,6 +148,7 @@ mise run release -- 0.2.0 --notes-file notes.md   # 릴리스 본문과 latest.j
 | `ffmpeg-<버전>.tar.xz`, `yt-dlp-<버전>.tar.gz` | 앱에 들어간 sidecar의 소스([라이선스](#라이선스))                          |
 | `SHA256SUMS`                                   | 위 파일의 SHA-256                                                          |
 | `release-notes.md`                             | 릴리스 본문(올리지 않음)                                                   |
+| `provenance.json`                              | 빌드 커밋, dry-run 여부, 자산별 SHA-256(올리지 않음)                       |
 
 - `--dry-run`은 같은 파일을 만들고 같은 검증까지 합니다. 공증은 실제로 Apple에 제출합니다. push와 릴리스 생성은 하지 않고, 끝나면 버전 커밋과 태그를 지워 브랜치와 작업 트리를 원래대로 둡니다. `--allow-branch`를 더하면 `main`이 아닌 브랜치에서도 시험할 수 있습니다(dry-run 전용).
 - 업데이트 엔드포인트는 `releases/latest/download/latest.json`이라, 초안과 프리릴리스는 설치된 앱에 보이지 않습니다.
@@ -152,14 +157,27 @@ mise run release -- 0.2.0 --notes-file notes.md   # 릴리스 본문과 latest.j
 
 - **push 전 실패**(확인, 빌드, 공증, 검증): 스크립트가 버전 커밋과 태그를 지우고 멈춥니다. 원인을 고치고 같은 명령을 다시 실행합니다.
 - **공증 거부**: `notarytool log`가 거부 사유를 출력합니다. 서명·entitlements를 고친 뒤 다시 실행합니다.
-- **push 실패**(`origin/main`이 앞서 나감, 권한이나 `main` 보호 규칙 등): `--atomic`이라 커밋도 태그도 올라가지 않고, 로컬도 되돌려집니다. `git pull` 뒤 다시 실행합니다.
-- **업로드 실패**(push 뒤): 커밋과 태그는 이미 원격에 있습니다. 같은 파일로 업로드만 다시 합니다. 초안이 남아 있으면 이어서 올리고, 같은 이름의 자산은 덮어씁니다.
+- **push 실패**: git이 실패를 알려도, 연결이 끊긴 경우에는 원격이 이미 받았을 수 있습니다. 그래서 스크립트는 `git ls-remote`로 원격의 `main`과 태그를 읽어 셋 중 하나로 판정합니다.
+  - **원격에 태그가 버전 커밋을 가리킴**(push됨): 로컬 커밋과 태그를 그대로 두고 멈춥니다. `--upload-only`로 업로드를 이어 갑니다.
+  - **원격의 `main`도 태그도 버전 커밋이 아님**(push 안 됨): 로컬 버전 커밋과 태그를 지웁니다. `origin/main`이 앞서 나갔거나 권한·`main` 보호 규칙에 막힌 경우이니, 원인을 해결하고(`git pull` 등) 같은 명령을 다시 실행합니다.
+  - **원격을 읽지 못했거나 `main`만 버전 커밋을 가리킴**(미확정): 아무것도 지우지 않고, 확인 절차를 출력합니다.
+
+    ```sh
+    git ls-remote origin refs/heads/main refs/tags/v0.2.0 'refs/tags/v0.2.0^{}'
+    # 태그가 버전 커밋을 가리키면: mise run release -- 0.2.0 --upload-only
+    # main도 태그도 버전 커밋이 아니면: git tag -d v0.2.0 && git reset --hard <출력된 원래 커밋>, 그다음 다시 실행
+    ```
+
+- **업로드 실패**(push 뒤): 커밋과 태그는 이미 원격에 있습니다. 같은 파일로 업로드만 다시 합니다.
 
   ```sh
   mise run release -- 0.2.0 --upload-only
   ```
 
-- **잘못 올린 릴리스**: 이미 받은 앱이 있을 수 있으니 지우지 말고, 고친 새 버전을 올립니다. 공개 직후 바로 거둬야 하면 `gh release edit v0.2.0 --draft=true`로 숨깁니다. 그러면 `latest.json`은 그 이전 릴리스를 가리킵니다.
+  - `releases/v0.2.0/provenance.json`을 원격 태그가 가리키는 커밋과 대조해, 그 커밋에서 실제 릴리스로 빌드한 파일만 올립니다. dry-run 파일이나 다른 커밋의 파일, 빌드 뒤 바뀐 파일은 거부합니다. 산출물 폴더가 없는 체크아웃에서는 업로드만 다시 할 수 없습니다.
+  - 초안이 남아 있으면 이어서 올리고 확인한 뒤 공개합니다. 이미 공개됐으면 자산이 같을 때 완료로 보고, 다를 때 거부합니다. 공개 요청은 성공했는데 응답만 끊긴 경우가 여기에 해당합니다.
+
+- **잘못 올린 릴리스**: 이미 받은 앱이 있을 수 있으니 지우지 말고, 고친 새 버전을 올립니다. 공개 직후 바로 거둬야 하면 `gh release edit v0.2.0 --draft=true`로 숨깁니다. 그러면 `latest.json`은 그 이전 릴리스를 가리킵니다. 숨긴 버전에는 `--upload-only`를 실행하지 않습니다. 남은 초안을 다시 공개하기 때문입니다.
 
 #### 키 백업
 
