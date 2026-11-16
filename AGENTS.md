@@ -1,14 +1,20 @@
 # Woodshed AI Agent Rule
 
-베이스·기타 연습 도구 macOS 앱(Tauri 2 + React/TS + Rust)입니다. 루트 저장소(mongmeo-common)의 `AGENTS.md` 규칙(한국어 경어체, 한국어 커밋 메시지, 기능 단위 커밋, Co-Author 없음, `mise exec -- <명령>`, 명시 버전 의존성)을 그대로 따르고, 아래 규칙을 추가로 지킵니다.
+베이스·기타 연습 도구 macOS 앱(Tauri 2 + React/TS + Rust)의 기여 규칙입니다. 사람과 코딩 에이전트 모두 아래 규칙을 따릅니다.
+
+## 공통 규칙
+
+- 문서·대화는 한국어 경어체로 씁니다. 커밋 메시지도 한국어로 쓰고, 기능 단위로 나눠 커밋합니다.
+- 명령은 `mise exec -- <명령>`으로 실행합니다. 의존성은 LTS를 우선하고, `latest` 없이 명시 버전으로 고정합니다.
+- 의존성을 바꾸면 `mise exec -- python3 scripts/collect-licenses.py`로 서드파티 고지(`LICENSES/`)를 다시 만듭니다.
 
 ## 검사 명령
 
 - 모든 도구는 `mise.toml`에 고정되어 있습니다. 명령은 `mise exec -- <명령>` 또는 `mise run <태스크>`로 실행합니다.
 - 커밋·push 전에 `mise run check`를 통과시킵니다. 내용: `biome check` → `tsc --noEmit` → `vitest run --maxWorkers=2` → `cargo fmt --check` → `cargo clippy --all-targets --locked -D warnings` → `cargo test --locked`.
   - 웹만: `mise run check:web`, Rust만: `mise run check:rust`.
-- 이 Mac은 다른 프로젝트와 공유합니다. 무거운 명령(빌드·전체 검사)은 한 번에 하나만 돌리고, `CARGO_BUILD_JOBS=4`(mise env에 설정됨), vitest는 `--maxWorkers=2`를 씁니다. 개발 서버·빌드한 앱은 확인 후 종료합니다.
-- 앱 빌드: `mise run app`(`scripts/build-app.sh`: 로컬 서명 인증서가 있으면 그것으로, 없으면 ad-hoc 서명) → `src-tauri/target/release/bundle/macos/Woodshed.app`. 인증서는 `mise run signing-cert`로 만들며 운영자 키체인 검색 목록을 바꾸므로 운영자 확인 뒤에만 실행합니다(README 로컬 서명).
+- 빌드 머신을 다른 작업과 함께 쓴다고 보고, 무거운 명령(빌드·전체 검사)은 한 번에 하나만 돌리고, `CARGO_BUILD_JOBS=4`(mise env에 설정됨), vitest는 `--maxWorkers=2`를 씁니다. 개발 서버·빌드한 앱은 확인 후 종료합니다.
+- 앱 빌드: `mise run app`(`scripts/build-app.sh`: 로컬 서명 인증서가 있으면 그것으로, 없으면 ad-hoc 서명) → `src-tauri/target/release/bundle/macos/Woodshed.app`. 인증서는 `mise run signing-cert`로 만들며 사용자 키체인 검색 목록을 바꾸므로 사용자 확인 뒤에만 실행합니다(README 로컬 서명).
 - 업데이트 테스트 빌드(로컬 엔드포인트, 클릭 없는 자동 설치)는 `scripts/build-update-test.sh`로만 만듭니다. 자동 설치는 Vite mode `update-test`에서만 켜지고, `pnpm build`·`mise run app`·`mise run app:release`는 `scripts/check-release-dist.mjs`로 그 코드가 없는지 검사합니다. 환경 변수로 켜는 테스트 분기를 제품 코드에 넣지 않습니다.
 - 실제 출력 장치 레이턴시 확인: `cd src-tauri && mise exec -- cargo run --release --example latency_probe` (스피커로 짧은 클릭음이 납니다).
 
@@ -17,12 +23,12 @@
 - 레이블, 현재 상태 값, 사용자가 지금 할 일, 입력 오류, 확인 대화상자의 결과 안내만 씁니다.
 - 히어로 문구, 앱 소개 문장, 구현 상태나 정책을 설명하는 문장은 절대 넣지 않습니다. 도구 화면 제목 외 설명 문구도 넣지 않습니다.
 - 모든 문구는 `src/locales/ko.json`과 `src/locales/en.json`에 같은 키로 넣습니다(키 불일치는 `src/i18n/i18n.test.ts`가 잡습니다). 컴포넌트에 문자열을 하드코딩하지 않습니다. 언어 이름(`한국어`, `English`)만 예외입니다.
-- 한국어 문구는 `/humanize-korean:humanize-korean` 스킬로 번역투가 없는지 다듬고, 영어도 자연스러운 앱 문구(Title Case 레이블)로 씁니다.
+- 한국어 문구는 번역투가 없는지 다듬고, 영어도 자연스러운 앱 문구(Title Case 레이블)로 씁니다.
 - 문구를 고친 뒤 `mise exec -- node scripts/collect-copy.mjs --check`로 하드코딩 문구·쓰지 않는 키를 확인합니다. 윤문 입력은 `--ko-text`, 키별 ko/en 표는 인자 없이 실행해 얻습니다.
 
 ## 디자인 규칙
 
-- `DESIGN.md`(VoltAgent/awesome-design-md의 apple 분석본)가 루트 디자인 룰보다 우선합니다.
+- 디자인 기준은 `DESIGN.md`(VoltAgent/awesome-design-md의 apple 분석본)입니다.
 - 색·타이포·간격·라운드는 `src/styles/tokens.css`의 `--ws-*` 변수만 씁니다. 새 색 값을 컴포넌트에 직접 쓰지 않습니다. 라이트/다크 둘 다 확인합니다.
 - 강조색은 하나(`--ws-color-accent`)뿐입니다. 카드·버튼·텍스트에 그림자를 넣지 않습니다. 굵기는 400/600만 씁니다. 버튼 눌림은 `transform: scale(0.95)`입니다.
 - 라운드는 컴팩트 컨트롤 `--ws-radius-sm`, 카드 `--ws-radius-lg`, 액션 버튼 `--ws-radius-pill`만 씁니다.
@@ -30,7 +36,7 @@
 
 ## 앱 구조
 
-- 도구 목록: `src/tools/tools.ts`의 `TOOL_IDS`(`tuner`, `metronome`, `drumMachine`, `stemSplitter`, `fretboard`). 각 도구 노드는 `src/tools/<도구>/`에 화면을 만들고 `src/App.tsx`에서 `ToolScreen` 대신 연결합니다.
+- 도구 목록: `src/tools/tools.ts`의 `TOOL_IDS`(`tuner`, `metronome`, `drumMachine`, `stemSplitter`, `fretboard`). 각 도구는 `src/tools/<도구>/`에 화면을 만들고 `src/App.tsx`에서 `ToolScreen` 대신 연결합니다.
 - 설정: `src-tauri/src/settings.rs`(`Settings`)와 `src/lib/settings.ts`가 짝입니다. 필드를 추가하면 둘 다 고치고, 누락 필드는 기본값으로 읽히게 합니다(`#[serde(default)]`).
   - 설정 파일 쓰기는 `SettingsStore::update(|s| ...)`로 자기 필드만 바꿉니다. 쓰기는 차례대로(현재값 읽기·변경·파일 쓰기·캐시 교체) 일어나 다른 소유자(화면, 출력 관리자, 튜너)의 변경을 되돌리지 않고, 읽기(`get`, `settings_load`)는 파일 쓰기를 기다리지 않습니다. `get()` 후 `save()`로 통째로 쓰지 않습니다.
   - 예외: `Settings.tuner`(입력 장치·채널·기준음)는 튜너 명령(`tuner_select_input`, `tuner_set_reference`)이 소유하고 `settings_save`가 보존하므로 `src/lib/settings.ts`에 두지 않습니다. 튜너 화면은 `tuner_start`가 돌려주는 상태를 씁니다.
@@ -39,7 +45,7 @@
 
 ## 오디오 엔진 계약 (`src-tauri/src/audio/`)
 
-이후 노드는 이 계약 위에 얹습니다. 계약을 바꿔야 하면 멈추고 conductor에게 알립니다.
+각 도구는 이 계약 위에 얹습니다. 계약을 바꿔야 하면 구현 전에 이슈나 PR로 먼저 논의합니다.
 
 ### 실시간 규칙
 
@@ -120,7 +126,7 @@ impl Source for Click {
 - 장치 목록은 틱과 선택 모두 같은 경로(`observe_devices`)로 관찰하므로, 어느 입력이 먼저 보든 변경 알림은 한 번 나갑니다.
 - 이벤트 불변식.
   - `audio://output-changed` (`{ generation, deviceId, sampleRate, channels, bufferFrames }`): 출력 열기 성공마다 정확히 1회, 성공 지점에서 발행합니다(이후 설정 저장 실패와 무관). 프런트는 `onOutputChanged`로 받습니다.
-  - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 틱에만. 입력을 쓰는 노드는 이를 받아 입력을 다시 엽니다.
+  - `audio://devices-changed` (`DeviceSnapshot { outputs, inputs, defaultOutput, defaultInput }`): 장치 목록·기본 장치가 바뀐 틱에만. 입력을 쓰는 코드는 이를 받아 입력을 다시 엽니다.
 - 상태 머신은 `OutputEnv` 트레이트로 환경을 분리해 가짜 환경으로 테스트합니다. 출력 관련 동작을 바꾸면 여러 틱 시나리오 테스트를 추가합니다.
 
 ### 오프라인 렌더 (테스트)
@@ -138,7 +144,7 @@ let reports = engine.take_notifications();
 
 ## 스템 라이브러리 계약 (`src-tauri/src/stems/`)
 
-스템 분리 화면(stem-player)과 분리 엔진(stem-engine)이 이 계약을 공유합니다. 바꿔야 하면 멈추고 conductor에게 알립니다.
+스템 분리 화면(stem-player)과 분리 엔진(stem-engine)이 이 계약을 공유합니다. 바꿔야 하면 구현 전에 이슈나 PR로 먼저 논의합니다.
 
 ### 디렉터리 (앱 데이터 `songs/<id>/`)
 

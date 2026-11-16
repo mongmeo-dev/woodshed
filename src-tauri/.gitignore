@@ -1,4 +1,7 @@
 /target/
 /gen/schemas
+
+# Sidecars built by scripts/fetch-binaries.sh
 /binaries/
+# Core ML model built by tools/stem-model/build.sh
 /models/

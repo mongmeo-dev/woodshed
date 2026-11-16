@@ -821,7 +821,7 @@ fn service_reports_a_missing_model_as_a_failure() {
     service.shutdown();
 }
 
-/// The conductor's rule: re-separating a song whose stems are ready never
+/// The library contract (AGENTS.md): re-separating a song whose stems are ready never
 /// touches its stems or manifest until six new stems are complete, whether
 /// it is cancelled, fails or the app stops in between.
 #[test]

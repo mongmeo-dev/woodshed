@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Woodshed — bass and guitar practice tools"
 edition = "2024"
 rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/mongmeo-dev/woodshed"
 publish = false
 
 [lib]
