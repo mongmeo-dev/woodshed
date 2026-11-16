@@ -103,6 +103,7 @@ sh scripts/build-update-test.sh 0.1.0 18765 <임시 폴더>/new --updater-artifa
 
 - 스크립트는 앱과 업데이트 파일을 지정한 폴더로 옮기고 `dist/`를 지워, `target/`에 테스트 빌드를 남기지 않습니다.
 - `pnpm build`, `mise run app`, `mise run app:release`는 빌드한 `dist/`를 `scripts/check-release-dist.mjs`로 검사합니다. 자동 설치 코드가 들어 있으면 실패하고, 앱 빌드는 만든 앱을 지웁니다.
+- `mise run app`·`mise run app:release`는 앱에 들어가는 프런트엔드를 바꿀 수 있는 설정을 받지 않습니다(`scripts/release-guard.sh`). `--config`·`-c` 인자, `TAURI_CONFIG`·`TAURI_FRONTEND_PATH`·`TAURI_APP_PATH`·`TAURI_PATH` 환경 변수, CLI가 스스로 합치는 `src-tauri/tauri.macos.conf.json`(`.json5`, `Tauri.macos.toml`, `Tauri.toml`)이 있으면 빌드 전에 멈춥니다.
 
 ### 첫 실행과 마이크 권한
 
