@@ -9,6 +9,10 @@ WOODSHED_RELEASE_KEYCHAIN="$HOME/Library/Keychains/woodshed-release.keychain-db"
 WOODSHED_RELEASE_DIR="$HOME/Library/Application Support/woodshed-release"
 WOODSHED_RELEASE_PASSWORD_FILE="$WOODSHED_RELEASE_DIR/keychain-password"
 WOODSHED_RELEASE_NOTARY_ENV="$WOODSHED_RELEASE_DIR/notary.env"
+# Updater signing key (minisign, `tauri signer`): signs the update archives
+# that installed apps verify against plugins.updater.pubkey in tauri.conf.json.
+WOODSHED_UPDATER_KEY="$WOODSHED_RELEASE_DIR/updater.key"
+WOODSHED_UPDATER_KEY_PASSWORD_FILE="$WOODSHED_RELEASE_DIR/updater-key-password"
 
 # SHA-1 of the Developer ID Application identity in the release keychain, or nothing.
 woodshed_release_identity() {

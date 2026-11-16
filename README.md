@@ -71,6 +71,40 @@ mise run app:release    # = sh scripts/build-release.sh
 - hardened runtime과 `src-tauri/Entitlements.plist`로 서명합니다. 마이크(`device.audio-input`)와, yt-dlp(PyInstaller)가 실행 중 푼 Python 라이브러리를 불러오도록 `cs.disable-library-validation`을 줍니다. Tauri는 이 파일을 sidecar 서명에도 씁니다.
 - 빌드 끝에 공증·staple을 하고 `codesign --verify --deep --strict`, `stapler validate`, `spctl`로 확인합니다. Developer ID 앱은 로컬 서명 앱과 다른 앱으로 보여 마이크 권한을 한 번 다시 묻습니다.
 
+### 업데이트 서명 키
+
+앱은 GitHub 릴리스의 `latest.json`(`https://github.com/mongmeo-dev/woodshed/releases/latest/download/latest.json`)으로 새 버전을 확인하고, 업데이트 파일의 서명을 `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`로 검증합니다.
+
+```sh
+sh scripts/create-updater-key.sh   # 한 번. 이미 있으면 다시 만들지 않고 공개키만 출력
+```
+
+- 키는 `~/Library/Application Support/woodshed-release/`에 있습니다(모두 권한 600).
+  - `updater.key`: 서명 개인키(암호로 잠김)
+  - `updater.key.pub`: 공개키(`plugins.updater.pubkey`와 같은 값)
+  - `updater-key-password`: 개인키 암호
+- **세 파일을 함께 백업하세요**(암호 관리자나 암호화한 외장 저장소 등, 저장소 밖). 개인키나 암호를 잃으면 새 업데이트에 서명할 수 없고, 이미 설치된 앱은 더 이상 업데이트되지 않습니다. 키를 새로 만들면 사용자가 새 버전을 직접 받아 설치해야 합니다.
+- 릴리스 빌드는 `TAURI_SIGNING_PRIVATE_KEY`(키 파일 경로나 내용)와 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`로 이 키를 넘깁니다. 경로 변수는 `scripts/release-signing.sh`의 `WOODSHED_UPDATER_KEY`, `WOODSHED_UPDATER_KEY_PASSWORD_FILE`입니다.
+- 업데이트 파일(`bundle.createUpdaterArtifacts`)은 빌드할 때 개인키가 있어야 하므로 기본 설정에 넣지 않습니다. `mise run app`은 키 없이 빌드됩니다.
+- 앱은 실행 3초 뒤 한 번 확인하고(실패는 조용히 넘김), 새 버전이 있으면 사이드바 아래에 '업데이트 설치' 버튼을 보입니다. 설치는 누를 때만 하고, 끝나면 앱이 다시 시작됩니다.
+
+#### 로컬 서버로 업데이트 확인
+
+테스트 빌드는 `scripts/build-update-test.sh`로만 만듭니다. 이 스크립트는 임시 `--config`로 엔드포인트를 `http://127.0.0.1:<포트>/latest.json`(http 허용)으로 바꾸고, 프런트엔드를 Vite mode `update-test`로 빌드합니다. 이 모드에서만 찾은 업데이트를 클릭 없이 바로 설치합니다. 환경 변수나 `.env`로는 켤 수 없습니다.
+
+```sh
+sh scripts/build-update-test.sh 0.0.9 18765 <임시 폴더>/old                       # 이전 버전 후보
+sh scripts/build-update-test.sh 0.1.0 18765 <임시 폴더>/new --updater-artifacts   # 새 버전과 서명된 업데이트 파일
+```
+
+1. `new/Woodshed.app.tar.gz`와 `.sig` 내용으로 `latest.json`(`version`, `platforms.darwin-aarch64.{signature,url}`)을 만들어 `python3 -m http.server 18765 --bind 127.0.0.1`로 내려줍니다.
+2. `open -g -n old/Woodshed.app`으로 후보를 엽니다. 업데이트되면 `~/Library/Logs/dev.mongmeo.woodshed/Woodshed.log`에 `Woodshed 0.0.9 started` 다음 `Woodshed 0.1.0 started`가 남습니다.
+3. 후보는 설치된 앱과 같은 앱 데이터 폴더를 쓰므로 실행 전에 백업하고 끝나면 되돌립니다.
+
+- 스크립트는 앱과 업데이트 파일을 지정한 폴더로 옮기고 `dist/`를 지워, `target/`에 테스트 빌드를 남기지 않습니다.
+- `pnpm build`, `mise run app`, `mise run app:release`는 빌드한 `dist/`를 `scripts/check-release-dist.mjs`로 검사합니다. 자동 설치 코드가 들어 있으면 실패하고, 앱 빌드는 만든 앱을 지웁니다.
+- `mise run app`·`mise run app:release`는 앱에 들어가는 프런트엔드를 바꿀 수 있는 설정을 받지 않습니다(`scripts/release-guard.sh`). `--config`·`-c` 인자, `TAURI_CONFIG`·`TAURI_FRONTEND_PATH`·`TAURI_APP_PATH`·`TAURI_PATH` 환경 변수, CLI가 스스로 합치는 `src-tauri/tauri.macos.conf.json`(`.json5`, `Tauri.macos.toml`, `Tauri.toml`)이 있으면 빌드 전에 멈춥니다.
+
 ### 첫 실행과 마이크 권한
 
 마이크 권한이 아직 정해지지 않았고 기본 출력 장치에 입력이 있으면(오디오 인터페이스 등), macOS는 권한 창에 답할 때까지 출력 스트림을 만들지 않습니다. 앱은 이때 권한 창을 띄우고, 답하는 즉시 출력을 엽니다(`AGENTS.md`의 출력 관리자). 첫 실행 조건은 `tccutil reset Microphone dev.mongmeo.woodshed`로 다시 만들 수 있습니다.
@@ -173,7 +207,7 @@ Woodshed의 소스 코드는 [MIT License](LICENSE)로 공개합니다. 앱은 �
 
 | 구성 요소                                | 앱에 들어가는 방식     | 라이선스                                                                                  | 고지                                                              |
 | ---------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Rust 크레이트(Tauri, 오디오, Core ML 등) | 앱 바이너리에 링크     | MIT, Apache-2.0, MPL-2.0, BSD, Zlib, Unicode 등(GPL 없음)                                 | [`LICENSES/rust-crates.md`](LICENSES/rust-crates.md)              |
+| Rust 크레이트(Tauri, 오디오, Core ML 등) | 앱 바이너리에 링크     | MIT, Apache-2.0, MPL-2.0, BSD, ISC, Zlib, Unicode 등(GPL 없음)                            | [`LICENSES/rust-crates.md`](LICENSES/rust-crates.md)              |
 | npm 패키지(React, i18next 등)            | 웹뷰 번들              | MIT, Apache-2.0 OR MIT(GPL 없음)                                                          | [`LICENSES/npm-packages.md`](LICENSES/npm-packages.md)            |
 | FFmpeg 9.0.2                             | 별도 프로그램(sidecar) | LGPL-2.1-or-later, 오디오 전용 구성(`--disable-gpl --disable-nonfree --disable-version3`) | [빌드 구성·소스 위치](LICENSES/README.md#ffmpeg-902)              |
 | yt-dlp 2026.10.26 `yt-dlp_macos`         | 별도 프로그램(sidecar) | yt-dlp는 Unlicense, PyInstaller 번들 전체는 GPLv3+                                        | [소스 위치](LICENSES/README.md#yt-dlp-20261026-yt-dlp_macos)      |

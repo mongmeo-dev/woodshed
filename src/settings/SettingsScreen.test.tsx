@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { i18n } from "../i18n";
+import { UpdaterProvider } from "../updater/UpdaterProvider";
 import { SettingsProvider } from "./SettingsProvider";
 import { SettingsScreen } from "./SettingsScreen";
 
@@ -54,7 +55,9 @@ beforeEach(async () => {
 async function chooseInterface() {
   render(
     <SettingsProvider>
-      <SettingsScreen />
+      <UpdaterProvider>
+        <SettingsScreen />
+      </UpdaterProvider>
     </SettingsProvider>,
   );
   const select = (await screen.findByLabelText("Output Device")) as HTMLSelectElement;

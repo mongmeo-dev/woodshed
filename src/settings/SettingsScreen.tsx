@@ -18,6 +18,7 @@ import {
 } from "../lib/audio";
 import type { Theme } from "../lib/settings";
 import { SegmentedControl } from "../shell/SegmentedControl";
+import { UpdateSection } from "../updater/UpdateSection";
 import { useSettings } from "./SettingsProvider";
 
 const SYSTEM_DEFAULT = "";
@@ -284,6 +285,8 @@ export function SettingsScreen() {
               </div>
             </div>
           </section>
+
+          <UpdateSection />
 
           {saveFailed && (
             <p className="row-error" role="alert">
