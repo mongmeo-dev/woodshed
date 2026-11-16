@@ -35,10 +35,22 @@ if (cmd === "push") {
     s.remote.main = rest[2].split(":")[0];
     s.remote.tag = s.local.tag;
   }
+  if (s.push.signal) {
+    // The release is stopped while git pushes: the shell gets the signal,
+    // and with dies, git is killed by it too (Ctrl-C reaches both).
+    save();
+    process.kill(process.ppid, s.push.signal);
+    if (s.push.dies) process.kill(process.pid, s.push.signal);
+  }
   done(s.push.code, "", s.push.code ? "fatal: the remote end hung up unexpectedly\\n" : "");
 }
 if (cmd === "ls-remote") {
   if (s.lsRemoteFails) done(128, "", "fatal: unable to access origin\\n");
+  if (s.lsRemoteHangs) {
+    save();
+    setTimeout(() => process.exit(0), 10000);
+    return;
+  }
   const lines = [];
   for (const ref of rest.slice(1)) {
     if (ref === "refs/heads/main" && s.remote.main) lines.push(s.remote.main + "\\t" + ref);
@@ -177,7 +189,7 @@ function provenance({ commit = RELEASE, dryRun = false } = {}) {
 }
 
 /** Runs `body` after sourcing release-lib.sh with a release's variables and its exit trap. */
-function run(body, { pushed = "false" } = {}) {
+function run(body, { pushed = "false", checkSeconds = 15 } = {}) {
   const work = join(dir, `work-${Math.random().toString(16).slice(2)}`);
   mkdirSync(work);
   const script = [
@@ -186,7 +198,9 @@ function run(body, { pushed = "false" } = {}) {
     'version=0.2.0 tag=v0.2.0 repo=owner/woodshed out="$OUT" work="$WORK"',
     `assets="${ASSETS.join(" ")}"`,
     `orig_head=${ORIG} release_commit=${RELEASE} bumped=true pushed=${pushed} mounted=false`,
+    `pushing=false push_check_seconds=${checkSeconds}`,
     "trap on_exit EXIT",
+    "trap 'exit 130' INT TERM HUP",
     body,
   ].join("\n");
   const result = spawnSync("sh", ["-c", script], {
@@ -261,6 +275,62 @@ describe("push_release", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("cannot tell whether origin took the push");
     expect(result.state.local).toEqual({ head: RELEASE, tag: RELEASE });
+  });
+});
+
+describe("a release stopped during the push", () => {
+  const stopped = (push, more = {}) => writeState({ push: { code: 0, ...push }, ...more });
+
+  it("keeps the commit and tag when origin took the push", () => {
+    stopped({ applies: true, signal: "SIGTERM" });
+    const result = run("push_release\necho not reached");
+    expect(result.status).toBe(130);
+    expect(result.stdout).not.toContain("not reached");
+    expect(result.stderr).toContain("release stopped during the push");
+    expect(result.stderr).toContain(`origin has tag v0.2.0 at ${RELEASE}`);
+    expect(result.stderr).toContain("mise run release -- 0.2.0 --upload-only");
+    expect(calls(result.state, "git tag -d")).toEqual([]);
+    expect(calls(result.state, "git reset")).toEqual([]);
+    expect(result.state.local).toEqual({ head: RELEASE, tag: RELEASE });
+  });
+
+  it("undoes the commit and tag only when origin took neither ref", () => {
+    stopped({ applies: false, signal: "SIGTERM" });
+    const result = run("push_release");
+    expect(result.status).toBe(130);
+    expect(result.stderr).toContain("origin took neither main nor tag v0.2.0");
+    expect(calls(result.state, "git tag -d")).toEqual(["git tag -d v0.2.0"]);
+    expect(calls(result.state, "git reset")).toEqual([`git reset -q --hard ${ORIG}`]);
+    expect(result.state.local).toEqual({ head: ORIG, tag: null });
+  });
+
+  it("removes nothing when origin cannot be read", () => {
+    stopped({ applies: true, signal: "SIGTERM" }, { lsRemoteFails: true });
+    const result = run("push_release");
+    expect(result.status).toBe(130);
+    expect(result.stderr).toContain("cannot tell whether origin took the push");
+    expect(calls(result.state, "git tag -d")).toEqual([]);
+    expect(calls(result.state, "git reset")).toEqual([]);
+    expect(result.state.local).toEqual({ head: RELEASE, tag: RELEASE });
+  });
+
+  it("judges origin the same way when Ctrl-C stops git as well", () => {
+    stopped({ applies: true, signal: "SIGINT", dies: true });
+    const result = run("push_release");
+    expect(result.status).toBe(130);
+    expect(result.stderr).toContain(`origin has tag v0.2.0 at ${RELEASE}`);
+    expect(result.state.local).toEqual({ head: RELEASE, tag: RELEASE });
+  });
+
+  it("gives up on an origin that does not answer in time and removes nothing", () => {
+    stopped({ applies: false, signal: "SIGTERM" }, { lsRemoteHangs: true });
+    const started = Date.now();
+    const result = run("push_release", { checkSeconds: 1 });
+    expect(Date.now() - started).toBeLessThan(8000);
+    expect(result.status).toBe(130);
+    expect(result.stderr).toContain("origin could not be read within 1s");
+    expect(calls(result.state, "git tag -d")).toEqual([]);
+    expect(calls(result.state, "git reset")).toEqual([]);
   });
 });
 
@@ -435,11 +505,17 @@ describe("remote_refs", () => {
     const commit = git(clone, "rev-parse", "HEAD");
     git(clone, "remote", "add", "origin", join(dir, "origin.git"));
     git(clone, "push", "-q", "origin", "main");
-    const read = () =>
-      spawnSync("sh", ["-c", `. "${ROOT}/scripts/release-lib.sh"; tag=v0.2.0; remote_refs`], {
-        cwd: clone,
-        encoding: "utf8",
-      }).stdout.trim();
+    // remote_refs and its time-limited form (used to judge a push) must agree.
+    const read = () => {
+      const [plain, timed] = ["remote_refs", "remote_refs_within"].map((fn) =>
+        spawnSync("sh", ["-c", `. "${ROOT}/scripts/release-lib.sh"; tag=v0.2.0; ${fn}`], {
+          cwd: clone,
+          encoding: "utf8",
+        }).stdout.trim(),
+      );
+      expect(timed).toBe(plain);
+      return plain;
+    };
     expect(read()).toBe(`${commit} -`);
     git(clone, "tag", "-a", "v0.2.0", "-m", "Woodshed 0.2.0");
     git(clone, "push", "-q", "origin", "refs/tags/v0.2.0");

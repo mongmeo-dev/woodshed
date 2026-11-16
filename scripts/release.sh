@@ -23,8 +23,10 @@
 #    It records the commit the files were built from, and whether a dry run
 #    made them, in releases/vX.Y.Z/provenance.json.
 # 5. Pushes the commit and tag together (scripts/release-lib.sh). When git
-#    reports a failure, origin decides: with the tag there it was pushed, with
-#    neither ref it was not (undone here), and otherwise nothing is touched.
+#    reports a failure or the release is stopped (INT, TERM) during the push,
+#    origin decides: with the tag there it was pushed, with neither ref it was
+#    not (undone here), and otherwise (or unreadable within 15 s) nothing is
+#    touched.
 # 6. Makes the GitHub release: a draft, all files uploaded and compared by
 #    SHA-256, then published as latest. A published release is never changed,
 #    nor an older version made latest. If the upload fails, rerun with
@@ -123,7 +125,9 @@ assets="$dmg_name $archive_name $archive_name.sig latest.json SHA256SUMS $ffmpeg
 
 work=$(mktemp -d)
 bumped=false
+pushing=false
 pushed=false
+push_check_seconds=15
 mounted=false
 orig_head=""
 release_commit=""

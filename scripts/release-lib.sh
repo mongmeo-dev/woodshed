@@ -5,8 +5,10 @@
 #
 # Uses the caller's variables: version, tag, repo, out, assets (file names in
 # $out), work (temporary directory), orig_head, release_commit, bumped
-# (true once the version files changed), pushed (false, true, or unknown when
-# origin could not be read after a failed push) and mounted.
+# (true once the version files changed), pushing (true while a push may be
+# under way), pushed (false, true, or unknown when origin could not tell),
+# push_check_seconds (how long to wait for origin when judging a push) and
+# mounted.
 
 step() {
   printf '\n==> %s\n' "$*"
@@ -45,6 +47,13 @@ restore_git() {
 
 on_exit() {
   status=$?
+  # Stopped (a signal, an error) while a push may have reached origin: undo
+  # nothing until origin says it took neither ref.
+  if [ "${pushing:-false}" = true ]; then
+    echo "release stopped during the push; reading origin to see what it took" >&2
+    judge_push
+    settle_push
+  fi
   if [ "$mounted" = true ]; then
     hdiutil detach -quiet -force "$work/mnt" || true
   fi
@@ -62,7 +71,12 @@ on_exit() {
 # to, "-" for a missing ref. Fails when origin cannot be read.
 remote_refs() {
   listing=$(git ls-remote origin refs/heads/main "refs/tags/$tag" "refs/tags/$tag^{}") || return 1
-  printf '%s\n' "$listing" | awk -v tag="refs/tags/$tag" '
+  printf '%s\n' "$listing" | read_remote_refs
+}
+
+# The "<main> <tag>" of remote_refs from a `git ls-remote` listing on stdin.
+read_remote_refs() {
+  awk -v tag="refs/tags/$tag" '
     $2 == "refs/heads/main" { main = $1 }
     $2 == tag { direct = $1 }
     $2 == tag "^{}" { peeled = $1 }
@@ -70,6 +84,79 @@ remote_refs() {
       if (peeled == "") peeled = direct
       printf "%s %s\n", (main == "" ? "-" : main), (peeled == "" ? "-" : peeled)
     }'
+}
+
+# remote_refs, given up after push_check_seconds (default 15): a hung origin
+# must not hold the exit trap. git runs as a direct background child so that
+# it is the process stopped when time is up.
+remote_refs_within() {
+  limit=$((${push_check_seconds:-15} * 10))
+  answer=$(mktemp)
+  git ls-remote origin refs/heads/main "refs/tags/$tag" "refs/tags/$tag^{}" >"$answer" &
+  reader=$!
+  ticks=0
+  while kill -0 "$reader" 2>/dev/null; do
+    if [ "$ticks" -ge "$limit" ]; then
+      kill "$reader" 2>/dev/null || true
+      wait "$reader" 2>/dev/null || true
+      rm -f "$answer"
+      return 1
+    fi
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  if ! wait "$reader"; then
+    rm -f "$answer"
+    return 1
+  fi
+  read_remote_refs <"$answer"
+  rm -f "$answer"
+}
+
+# Sets push_state (pushed, not_pushed or unknown) and push_detail from what
+# origin has after a push that did not finish cleanly:
+#   - tag at the version commit: pushed;
+#   - neither main nor the tag at it: not pushed;
+#   - origin unreadable in time, or main at it without the tag: unknown.
+judge_push() {
+  if ! refs=$(remote_refs_within); then
+    push_state=unknown
+    push_detail="origin could not be read within ${push_check_seconds:-15}s"
+    return 0
+  fi
+  remote_main=${refs% *}
+  remote_tag=${refs#* }
+  if [ "$remote_tag" = "$release_commit" ]; then
+    push_state=pushed
+    push_detail="origin has tag $tag at $release_commit (main at $remote_main)"
+  elif [ "$remote_main" != "$release_commit" ]; then
+    push_state=not_pushed
+    push_detail="origin took neither main nor tag $tag (main at $remote_main, tag at $remote_tag)"
+  else
+    push_state=unknown
+    push_detail="origin has main at $release_commit but tag $tag at $remote_tag"
+  fi
+}
+
+# Acts on judge_push: keeps everything unless origin took neither ref (then
+# pushed stays false and on_exit undoes the version commit and tag).
+settle_push() {
+  case "$push_state" in
+  pushed)
+    pushed=true
+    echo "error: the push did not finish cleanly, but $push_detail." >&2
+    echo "The version commit and tag are kept. Upload the release with:" >&2
+    echo "  mise run release -- $version --upload-only" >&2
+    ;;
+  not_pushed)
+    echo "error: $push_detail" >&2
+    ;;
+  *)
+    pushed=unknown
+    explain_unknown_push "$push_detail"
+    ;;
+  esac
+  pushing=false
 }
 
 explain_unknown_push() {
@@ -84,38 +171,22 @@ explain_unknown_push() {
 }
 
 # Pushes the version commit to main and the tag, together. A push can fail
-# on this side after origin took it (a dropped connection), so a failure is
-# judged by what origin then has:
-#   - tag at the version commit: pushed; keep everything, upload with --upload-only;
-#   - neither main nor the tag at it: not pushed; exit, on_exit undoes the commit and tag;
-#   - origin unreadable, or main at it without the tag: unknown; keep everything, explain.
+# on this side after origin took it (a dropped connection), and the release
+# can be stopped (INT, TERM) while it runs, so from just before the push until
+# its outcome is known `pushing` is true: a failure here, or on_exit, then
+# judges the push by what origin has (judge_push) and undoes the version
+# commit and tag only when origin took neither ref.
 push_release() {
   step "push $tag and main"
+  pushing=true
   if git push --atomic origin "$release_commit:refs/heads/main" "refs/tags/$tag"; then
     pushed=true
+    pushing=false
     return 0
   fi
   echo "git push reported a failure; reading origin to see what it took" >&2
-  if ! refs=$(remote_refs); then
-    pushed=unknown
-    explain_unknown_push "origin could not be read"
-    exit 1
-  fi
-  remote_main=${refs% *}
-  remote_tag=${refs#* }
-  if [ "$remote_tag" = "$release_commit" ]; then
-    pushed=true
-    echo "error: git push reported a failure, but origin has tag $tag at $release_commit (main at $remote_main)." >&2
-    echo "The version commit and tag are kept. Upload the release with:" >&2
-    echo "  mise run release -- $version --upload-only" >&2
-    exit 1
-  fi
-  if [ "$remote_main" != "$release_commit" ]; then
-    echo "error: origin took neither main nor tag $tag (main at $remote_main, tag at $remote_tag)" >&2
-    exit 1
-  fi
-  pushed=unknown
-  explain_unknown_push "origin has main at $release_commit but tag $tag at $remote_tag"
+  judge_push
+  settle_push
   exit 1
 }
 
