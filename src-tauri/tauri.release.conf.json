@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "createUpdaterArtifacts": true,
     "macOS": {
       "hardenedRuntime": true,
       "entitlements": "Entitlements.plist"
