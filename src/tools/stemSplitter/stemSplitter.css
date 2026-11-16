@@ -178,45 +178,6 @@
   accent-color: var(--ws-color-accent);
 }
 
-.stems .progress {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  height: 4px;
-  overflow: hidden;
-  border-radius: var(--ws-radius-pill);
-  background: var(--ws-color-control);
-}
-
-.stems .progress-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--ws-color-accent);
-  transition: width var(--ws-duration-glide) var(--ws-ease-glide);
-}
-
-/* Unknown amount: a short segment glides back and forth. */
-.stems .progress[data-indeterminate="true"] .progress-fill {
-  width: 30%;
-  animation: progress-sweep calc(var(--ws-duration-glide) * 6) var(--ws-ease-glide) infinite
-    alternate;
-}
-
-@keyframes progress-sweep {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(233%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .stems .progress[data-indeterminate="true"] .progress-fill {
-    animation: none;
-  }
-}
-
 /* ---- import --------------------------------------------------------------- */
 
 .stems .import {

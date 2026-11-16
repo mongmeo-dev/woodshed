@@ -254,6 +254,75 @@ button {
   transform: scale(0.95);
 }
 
+.progress {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-color-control);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ws-color-accent);
+  transition: width var(--ws-duration-glide) var(--ws-ease-glide);
+}
+
+/* Unknown amount: a short segment glides back and forth. */
+.progress[data-indeterminate="true"] .progress-fill {
+  width: 30%;
+  animation: progress-sweep calc(var(--ws-duration-glide) * 6) var(--ws-ease-glide) infinite
+    alternate;
+}
+
+@keyframes progress-sweep {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(233%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress[data-indeterminate="true"] .progress-fill {
+    animation: none;
+  }
+}
+
+.sidebar-update {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-xs);
+  padding-top: var(--ws-space-sm);
+}
+
+.sidebar-update .button-primary {
+  justify-content: center;
+}
+
+.sidebar-update-label {
+  color: var(--ws-color-text-secondary);
+  font-size: var(--ws-type-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-update .progress {
+  flex: none;
+}
+
+.update-actions .button-primary:disabled {
+  opacity: 0.4;
+}
+
+.update-actions .progress {
+  flex: none;
+  width: 160px;
+}
+
 .test-sound {
   display: flex;
   align-items: center;

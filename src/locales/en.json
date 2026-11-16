@@ -117,6 +117,17 @@
       "light": "Light",
       "dark": "Dark"
     },
+    "updates": {
+      "section": "Updates",
+      "version": "Current Version",
+      "status": "Status",
+      "check": "Check for Updates",
+      "checking": "Checking",
+      "upToDate": "Up to Date",
+      "available": "Version {{version}} Available",
+      "checkFailed": "Couldn't check for updates",
+      "installFailed": "Couldn't install the update"
+    },
     "saveFailed": "Couldn't save settings"
   },
   "drumMachine": {
@@ -340,5 +351,10 @@
       "failed": "Couldn't load the song",
       "open": "Can't open the song"
     }
+  },
+  "updates": {
+    "install": "Install Update",
+    "downloading": "Downloading {{percent}}%",
+    "downloadingUnknown": "Downloading"
   }
 }

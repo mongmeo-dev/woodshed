@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SeparationEvent } from "../../lib/stems";
-import { ProgressBar } from "./ProgressBar";
+import { ProgressBar } from "../../shell/ProgressBar";
 
 interface SeparationSlotProps {
   /** Latest separation event for the open song, if any. */

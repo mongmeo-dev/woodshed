@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ImportErrorCode } from "../../lib/stems";
-import { ProgressBar } from "./ProgressBar";
+import { ProgressBar } from "../../shell/ProgressBar";
 import type { ImportState } from "./useLibrary";
 
 interface ImportBarProps {
