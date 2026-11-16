@@ -4,13 +4,17 @@
 // the public key of another throwaway key (other-key.pub).
 import { readFileSync } from "node:fs";
 import {
+  assetsProblem,
   bumpCargoLock,
   bumpCargoToml,
   bumpJson,
   checkNextVersion,
   compareVersions,
   latestJson,
+  newerRelease,
   parseVersion,
+  provenance,
+  provenanceProblem,
   readVersions,
   signatureProblem,
   signedMessage,
@@ -120,5 +124,69 @@ describe("latest.json", () => {
         "darwin-aarch64": { signature: "c2ln", url: "https://example.invalid/Woodshed.app.tar.gz" },
       },
     });
+  });
+});
+
+describe("release assets", () => {
+  const hashes = { "a.dmg": "aa", "latest.json": "bb" };
+
+  it("match only when every file is there with the same SHA-256 and nothing else", () => {
+    const same = [
+      { name: "a.dmg", digest: "sha256:aa" },
+      { name: "latest.json", digest: "sha256:bb" },
+    ];
+    expect(assetsProblem(same, hashes)).toBeNull();
+    expect(assetsProblem(same.slice(0, 1), hashes)).toBe("latest.json is missing");
+    expect(assetsProblem([same[0], { name: "latest.json", digest: "sha256:cc" }], hashes)).toBe(
+      "latest.json differs",
+    );
+    expect(assetsProblem([same[0], { name: "latest.json" }], hashes)).toBe(
+      "latest.json has no digest",
+    );
+    expect(assetsProblem([...same, { name: "extra.zip", digest: "sha256:dd" }], hashes)).toBe(
+      "extra.zip is not one of the release files",
+    );
+  });
+
+  it("finds a published release above the version, ignoring drafts and prereleases", () => {
+    const release = (tagName, more = {}) => ({
+      tagName,
+      isDraft: false,
+      isPrerelease: false,
+      ...more,
+    });
+    expect(newerRelease("0.2.0", [release("v0.1.0"), release("v0.2.0")])).toBeNull();
+    expect(newerRelease("0.2.0", [release("v0.1.0"), release("v0.10.0")])).toBe("v0.10.0");
+    expect(newerRelease("0.2.0", [release("v0.3.0", { isDraft: true })])).toBeNull();
+    expect(newerRelease("0.2.0", [release("v0.3.0", { isPrerelease: true })])).toBeNull();
+    expect(newerRelease("0.2.0", [release("nightly")])).toBeNull();
+  });
+});
+
+describe("provenance", () => {
+  const hashes = { "a.dmg": "aa", "latest.json": "bb" };
+  const built = provenance({ version: "0.2.0", commit: "c1", dryRun: false, hashes });
+
+  it("allows the release build of the tagged commit", () => {
+    expect(built).toEqual({
+      version: "0.2.0",
+      tag: "v0.2.0",
+      commit: "c1",
+      dryRun: false,
+      assets: hashes,
+    });
+    expect(provenanceProblem(built, { version: "0.2.0", commit: "c1", hashes })).toBeNull();
+  });
+
+  it("refuses a dry run, another commit or version, and changed or other files", () => {
+    const check = (recorded, more = {}) =>
+      provenanceProblem(recorded, { version: "0.2.0", commit: "c1", hashes, ...more });
+    expect(check({ ...built, dryRun: true })).toMatch(/dry run/);
+    expect(check(built, { commit: "c2" })).toMatch(/built from c1, but the tag points to c2/);
+    expect(check({ ...built, version: "0.1.0" })).toMatch(/version 0.1.0/);
+    expect(check(built, { hashes: { ...hashes, "latest.json": "zz" } })).toMatch(
+      /changed since the build: latest.json/,
+    );
+    expect(check(built, { hashes: { "a.dmg": "aa" } })).toMatch(/other files/);
   });
 });

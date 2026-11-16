@@ -8,6 +8,11 @@
 //   node scripts/release-files.mjs bump <version>
 //   node scripts/release-files.mjs latest-json <out> <version> <notes file> <sig file> <url>
 //   node scripts/release-files.mjs verify-latest <latest.json> <archive> <version> <url>
+//   node scripts/release-files.mjs provenance-write <dir> <version> <commit> <dry run: true|false> <file>...
+//   node scripts/release-files.mjs provenance-check <dir> <version> <commit> <file>...
+//   node scripts/release-files.mjs release-state <gh release view --json isDraft,assets>
+//   node scripts/release-files.mjs assets-match <gh release view --json isDraft,assets> <dir> <file>...
+//   node scripts/release-files.mjs check-newest <version> <gh release list --json tagName,isDraft,isPrerelease>
 //
 // Update signatures are minisign signatures (`tauri signer`), base64-encoded
 // as a whole file, like the public key. They are checked here with node:crypto
@@ -15,7 +20,8 @@
 // signature over the trusted comment), so the check does not trust the tool
 // that made them.
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { createReadStream, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -230,6 +236,87 @@ async function verifyLatest(latestPath, archive, version, url) {
   );
 }
 
+export async function sha256File(path) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function fileHashes(dir, names) {
+  const hashes = {};
+  for (const name of names) {
+    hashes[name] = await sha256File(join(dir, name));
+  }
+  return hashes;
+}
+
+// Provenance (releases/vX.Y.Z/provenance.json, not uploaded): which commit
+// the files were built from and whether a dry run made them, so an upload
+// never sends files of another commit or of a dry run.
+export const PROVENANCE = "provenance.json";
+
+export function provenance({ version, commit, dryRun, hashes }) {
+  return { version, tag: `v${version}`, commit, dryRun, assets: hashes };
+}
+
+/** Why the recorded build may not be uploaded for `commit`, or null. */
+export function provenanceProblem(recorded, { version, commit, hashes }) {
+  if (recorded.dryRun !== false) return "the files were made by a dry run";
+  if (recorded.version !== version) return `the files are for version ${recorded.version}`;
+  if (recorded.commit !== commit) {
+    return `the files were built from ${recorded.commit}, but the tag points to ${commit}`;
+  }
+  const names = Object.keys(hashes);
+  const recordedNames = Object.keys(recorded.assets ?? {});
+  if (recordedNames.length !== names.length || recordedNames.some((name) => !(name in hashes))) {
+    return `the build recorded other files (${recordedNames.join(", ")})`;
+  }
+  const changed = names.filter((name) => recorded.assets[name] !== hashes[name]);
+  return changed.length > 0 ? `changed since the build: ${changed.join(", ")}` : null;
+}
+
+/** `gh release view --json isDraft,assets` → "draft" or "published". */
+export function releaseState(view) {
+  return view.isDraft ? "draft" : "published";
+}
+
+/**
+ * Why the release's assets (`gh release view --json assets`: name, digest
+ * "sha256:<hex>") are not exactly `hashes` (name → sha256 hex), or null.
+ */
+export function assetsProblem(assets, hashes) {
+  const remote = new Map(assets.map((asset) => [asset.name, asset]));
+  const problems = [];
+  for (const [name, hash] of Object.entries(hashes)) {
+    const asset = remote.get(name);
+    if (!asset) problems.push(`${name} is missing`);
+    else if (!asset.digest) problems.push(`${name} has no digest`);
+    else if (asset.digest !== `sha256:${hash}`) problems.push(`${name} differs`);
+  }
+  for (const name of remote.keys()) {
+    if (!(name in hashes)) problems.push(`${name} is not one of the release files`);
+  }
+  return problems.length > 0 ? problems.join(", ") : null;
+}
+
+/** The tag of a published release above `version` (drafts, prereleases left out), or null. */
+export function newerRelease(version, releases) {
+  const newer = releases.find((release) => {
+    const other = release.tagName.replace(/^v/, "");
+    return (
+      !release.isDraft &&
+      !release.isPrerelease &&
+      VERSION_RE.test(other) &&
+      compareVersions(other, version) > 0
+    );
+  });
+  return newer ? newer.tagName : null;
+}
+
+const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+
 async function main([command, ...args]) {
   switch (command) {
     case "current": {
@@ -275,6 +362,49 @@ async function main([command, ...args]) {
     case "verify-latest": {
       const [latestPath, archive, version, url] = args;
       await verifyLatest(latestPath, archive, version, url);
+      return;
+    }
+    case "provenance-write": {
+      const [dir, version, commit, dryRun, ...names] = args;
+      if (dryRun !== "true" && dryRun !== "false") throw new Error(`dry run: ${dryRun}`);
+      const record = provenance({
+        version,
+        commit,
+        dryRun: dryRun === "true",
+        hashes: await fileHashes(dir, names),
+      });
+      writeFileSync(join(dir, PROVENANCE), `${JSON.stringify(record, null, 2)}\n`);
+      return;
+    }
+    case "provenance-check": {
+      const [dir, version, commit, ...names] = args;
+      const path = join(dir, PROVENANCE);
+      if (!existsSync(path)) throw new Error(`${path} is missing; build the release again`);
+      const problem = provenanceProblem(readJson(path), {
+        version,
+        commit,
+        hashes: await fileHashes(dir, names),
+      });
+      if (problem) throw new Error(`${dir}: ${problem}`);
+      console.log(`${dir}: built from ${commit} (v${version}), not a dry run`);
+      return;
+    }
+    case "release-state": {
+      console.log(releaseState(readJson(args[0])));
+      return;
+    }
+    case "assets-match": {
+      const [viewPath, dir, ...names] = args;
+      const problem = assetsProblem(readJson(viewPath).assets ?? [], await fileHashes(dir, names));
+      if (problem) throw new Error(`release assets differ from ${dir}: ${problem}`);
+      return;
+    }
+    case "check-newest": {
+      const [version, listPath] = args;
+      const newer = newerRelease(version, readJson(listPath));
+      if (newer) {
+        throw new Error(`${newer} is already published; ${version} would replace it as latest`);
+      }
       return;
     }
     default:
